@@ -108,6 +108,14 @@ export type Snapshot = z.infer<typeof snapshotSchema>;
 export type SnapshotParameter = Snapshot["parameters"][string];
 
 /**
+ * Stored snapshot bytes → validated snapshot. Refuses a `format` it does not
+ * know rather than guessing (§3.3).
+ */
+export function parseSnapshot(bytes: string): Snapshot {
+  return snapshotSchema.parse(JSON.parse(bytes));
+}
+
+/**
  * The draft rows publish serializes, joined and ordered by the caller:
  * conditional values in `position` order. Parameter `description` is draft-only
  * operator metadata and deliberately absent — snapshots are lossy (§3.3).

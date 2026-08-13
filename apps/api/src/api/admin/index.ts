@@ -6,6 +6,7 @@ import { createConditionRoutes } from "./conditions";
 import { createEnvironmentRoutes } from "./environments";
 import { createParameterRoutes } from "./parameters";
 import { createProjectRoutes } from "./projects";
+import { createVersionRoutes } from "./versions";
 
 /** The §8.2 admin surface, mounted under /v1/admin, all behind adminAuth. */
 export function createAdminRoutes(env: Env): Hono<AppEnv> {
@@ -15,5 +16,6 @@ export function createAdminRoutes(env: Env): Hono<AppEnv> {
   app.route("/", createEnvironmentRoutes(env.services.environments));
   app.route("/", createConditionRoutes(env.services.conditions));
   app.route("/", createParameterRoutes(env.services.parameters));
+  app.route("/", createVersionRoutes(env.services.publish));
   return app;
 }

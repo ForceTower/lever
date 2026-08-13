@@ -37,3 +37,8 @@ export function notFound(entity: string): LeverError {
 export function isConstraintError(error: unknown): boolean {
   return error instanceof SQLiteError && (error.code?.startsWith("SQLITE_CONSTRAINT") ?? false);
 }
+
+/** A lost BEGIN IMMEDIATE race (§8.3) — publish maps this to 409, never 500. */
+export function isBusyError(error: unknown): boolean {
+  return error instanceof SQLiteError && (error.code?.startsWith("SQLITE_BUSY") ?? false);
+}

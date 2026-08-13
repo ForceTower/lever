@@ -26,12 +26,13 @@ export interface TestApp {
   request: (path: string, init?: TestRequestInit) => Promise<Response>;
 }
 
-export function createTestApp(): TestApp {
+/** `dbPath` other than `:memory:` lets a test open a second handle on the same file. */
+export function createTestApp(dbPath = ":memory:"): TestApp {
   initLogger("error");
   const vars = envVarsSchema.parse({
     LEVER_ADMIN_TOKENS: `${TEST_ADMIN_NAME}:${TEST_ADMIN_SECRET}`,
   });
-  const db = openDb(":memory:");
+  const db = openDb(dbPath);
   runMigrations(db);
   const env = buildEnv(vars, db);
   const app = createApp(env);

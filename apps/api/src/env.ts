@@ -11,6 +11,7 @@ import { createConditionsService, type ConditionsService } from "./service/admin
 import { createEnvironmentsService, type EnvironmentsService } from "./service/admin/environments";
 import { createParametersService, type ParametersService } from "./service/admin/parameters";
 import { createProjectsService, type ProjectsService } from "./service/admin/projects";
+import { createPublishService, type PublishService } from "./service/publish";
 import { createNoopResolveCache, type ResolveCache } from "./service/resolve-cache";
 
 export interface AdminToken {
@@ -81,6 +82,7 @@ export interface Env {
     environments: EnvironmentsService;
     conditions: ConditionsService;
     parameters: ParametersService;
+    publish: PublishService;
   };
 }
 
@@ -108,6 +110,7 @@ export function buildEnv(
       environments: createEnvironmentsService(repos, resolveCache),
       conditions: createConditionsService(repos),
       parameters: createParametersService(db, repos),
+      publish: createPublishService(db, repos, resolveCache),
     },
   };
 }
