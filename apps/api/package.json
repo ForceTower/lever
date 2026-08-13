@@ -1,5 +1,6 @@
 {
   "name": "@lever/api",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "bun run --watch src/index.ts",
@@ -7,6 +8,7 @@
   },
   "dependencies": {
     "@loglayer/transport-pino": "^3.3.0",
+    "hono": "^4.13.2",
     "loglayer": "^9.4.0",
     "pino": "^10.3.1",
     "zod": "^4.4.3"

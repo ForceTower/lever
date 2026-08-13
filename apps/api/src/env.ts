@@ -7,6 +7,11 @@ import { createParameterRepo, type ParameterRepo } from "./db/parameter-repo";
 import { createProjectRepo, type ProjectRepo } from "./db/project-repo";
 import { createVersionRepo, type VersionRepo } from "./db/version-repo";
 import { initLogger } from "./logger";
+import { createConditionsService, type ConditionsService } from "./service/admin/conditions";
+import { createEnvironmentsService, type EnvironmentsService } from "./service/admin/environments";
+import { createParametersService, type ParametersService } from "./service/admin/parameters";
+import { createProjectsService, type ProjectsService } from "./service/admin/projects";
+import { createNoopResolveCache, type ResolveCache } from "./service/resolve-cache";
 
 export interface AdminToken {
   name: string;
@@ -70,18 +75,39 @@ export interface Env {
     parameters: ParameterRepo;
     versions: VersionRepo;
   };
+  resolveCache: ResolveCache;
+  services: {
+    projects: ProjectsService;
+    environments: EnvironmentsService;
+    conditions: ConditionsService;
+    parameters: ParametersService;
+  };
 }
 
-export function buildEnv(vars: EnvVars, db: Database): Env {
+// The no-op cache stands in until Phase 5 implements §6.4; the services
+// already notify it through their single mutation code paths.
+export function buildEnv(
+  vars: EnvVars,
+  db: Database,
+  resolveCache: ResolveCache = createNoopResolveCache(),
+): Env {
+  const repos = {
+    projects: createProjectRepo(db),
+    environments: createEnvironmentRepo(db),
+    conditions: createConditionRepo(db),
+    parameters: createParameterRepo(db),
+    versions: createVersionRepo(db),
+  };
   return {
     vars,
     db,
-    repos: {
-      projects: createProjectRepo(db),
-      environments: createEnvironmentRepo(db),
-      conditions: createConditionRepo(db),
-      parameters: createParameterRepo(db),
-      versions: createVersionRepo(db),
+    repos,
+    resolveCache,
+    services: {
+      projects: createProjectsService(repos, resolveCache),
+      environments: createEnvironmentsService(repos, resolveCache),
+      conditions: createConditionsService(repos),
+      parameters: createParametersService(db, repos),
     },
   };
 }
