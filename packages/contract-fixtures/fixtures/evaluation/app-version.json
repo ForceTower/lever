@@ -1,0 +1,309 @@
+[
+  {
+    "name": "gte matches at the boundary",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "5.2+",
+                "clauses": [{ "kind": "appVersion", "op": "gte", "value": "5.2.0" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "5.2.0", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "gte matches above the boundary",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "5.2+",
+                "clauses": [{ "kind": "appVersion", "op": "gte", "value": "5.2.0" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "5.10.1", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "a prerelease precedes its release: 5.2.0-beta.1 does not satisfy gte 5.2.0",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "5.2+",
+                "clauses": [{ "kind": "appVersion", "op": "gte", "value": "5.2.0" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "5.2.0-beta.1", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": false } } }
+  },
+  {
+    "name": "a prerelease satisfies lt against its release",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "pre-5.2",
+                "clauses": [{ "kind": "appVersion", "op": "lt", "value": "5.2.0" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "5.2.0-beta.1", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "prerelease identifiers order numerically then lexically: beta.2 gt beta.1, alpha lt beta",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "after_beta_1": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "gt-beta-1",
+                "clauses": [{ "kind": "appVersion", "op": "gt", "value": "5.2.0-beta.1" }]
+              },
+              "value": true
+            }
+          ]
+        },
+        "before_beta": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "lt-beta",
+                "clauses": [{ "kind": "appVersion", "op": "lt", "value": "5.2.0-beta" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "5.2.0-beta.2", "attributes": {} },
+    "expected": {
+      "values": {
+        "after_beta_1": { "type": "boolean", "value": true },
+        "before_beta": { "type": "boolean", "value": false }
+      }
+    }
+  },
+  {
+    "name": "numeric prerelease identifiers rank lower than alphanumeric ones",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "gt-numeric-pre",
+                "clauses": [{ "kind": "appVersion", "op": "gt", "value": "1.0.0-11" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "1.0.0-2a", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "eq and neq compare precedence",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "exactly_520": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "eq-5.2.0",
+                "clauses": [{ "kind": "appVersion", "op": "eq", "value": "5.2.0" }]
+              },
+              "value": true
+            }
+          ]
+        },
+        "not_510": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "neq-5.1.0",
+                "clauses": [{ "kind": "appVersion", "op": "neq", "value": "5.1.0" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "5.2.0", "attributes": {} },
+    "expected": {
+      "values": {
+        "exactly_520": { "type": "boolean", "value": true },
+        "not_510": { "type": "boolean", "value": true }
+      }
+    }
+  },
+  {
+    "name": "lte matches at and below the boundary",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "lte-5.2.0",
+                "clauses": [{ "kind": "appVersion", "op": "lte", "value": "5.2.0" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "5.2.0", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "non-semver context appVersion never matches any version clause, including neq",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gated": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "5.2+",
+                "clauses": [{ "kind": "appVersion", "op": "gte", "value": "5.2.0" }]
+              },
+              "value": true
+            }
+          ]
+        },
+        "negated": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "neq-9.9.9",
+                "clauses": [{ "kind": "appVersion", "op": "neq", "value": "9.9.9" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "5.2", "attributes": {} },
+    "expected": {
+      "values": {
+        "gated": { "type": "boolean", "value": false },
+        "negated": { "type": "boolean", "value": false }
+      }
+    }
+  },
+  {
+    "name": "missing appVersion never matches, including neq",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "negated": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "neq-9.9.9",
+                "clauses": [{ "kind": "appVersion", "op": "neq", "value": "9.9.9" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "attributes": {} },
+    "expected": { "values": { "negated": { "type": "boolean", "value": false } } }
+  },
+  {
+    "name": "build metadata is ignored for precedence",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "eq-5.2.0",
+                "clauses": [{ "kind": "appVersion", "op": "eq", "value": "5.2.0" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "appVersion": "5.2.0+build.99", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  }
+]

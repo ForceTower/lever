@@ -1,0 +1,199 @@
+[
+  {
+    "name": "attribute eq and neq compare strings",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "for_students": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "students",
+                "clauses": [
+                  { "kind": "attribute", "attribute": "role", "op": "eq", "value": "student" }
+                ]
+              },
+              "value": true
+            }
+          ]
+        },
+        "not_teachers": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "non-teachers",
+                "clauses": [
+                  { "kind": "attribute", "attribute": "role", "op": "neq", "value": "teacher" }
+                ]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "attributes": { "role": "student" } },
+    "expected": {
+      "values": {
+        "for_students": { "type": "boolean", "value": true },
+        "not_teachers": { "type": "boolean", "value": true }
+      }
+    }
+  },
+  {
+    "name": "attribute in and notIn compare list membership",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "pilot_campus": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "pilot",
+                "clauses": [
+                  { "kind": "attribute", "attribute": "campus", "op": "in", "value": ["a", "b"] }
+                ]
+              },
+              "value": true
+            }
+          ]
+        },
+        "outside_pilot": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "not-pilot",
+                "clauses": [
+                  { "kind": "attribute", "attribute": "campus", "op": "notIn", "value": ["c", "d"] }
+                ]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "attributes": { "campus": "a" } },
+    "expected": {
+      "values": {
+        "pilot_campus": { "type": "boolean", "value": true },
+        "outside_pilot": { "type": "boolean", "value": true }
+      }
+    }
+  },
+  {
+    "name": "exists matches any present value, including the empty string",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "has_cohort": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "cohort-present",
+                "clauses": [{ "kind": "attribute", "attribute": "cohort", "op": "exists" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "attributes": { "cohort": "" } },
+    "expected": { "values": { "has_cohort": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "missing attribute never matches, including neq, notIn, and exists",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "neq_gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "non-teachers",
+                "clauses": [
+                  { "kind": "attribute", "attribute": "role", "op": "neq", "value": "teacher" }
+                ]
+              },
+              "value": true
+            }
+          ]
+        },
+        "not_in_gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "not-pilot",
+                "clauses": [
+                  { "kind": "attribute", "attribute": "campus", "op": "notIn", "value": ["c"] }
+                ]
+              },
+              "value": true
+            }
+          ]
+        },
+        "exists_gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "cohort-present",
+                "clauses": [{ "kind": "attribute", "attribute": "cohort", "op": "exists" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "attributes": {} },
+    "expected": {
+      "values": {
+        "neq_gate": { "type": "boolean", "value": false },
+        "not_in_gate": { "type": "boolean", "value": false },
+        "exists_gate": { "type": "boolean", "value": false }
+      }
+    }
+  },
+  {
+    "name": "attribute comparison is case-sensitive, unlike platform",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "students",
+                "clauses": [
+                  { "kind": "attribute", "attribute": "role", "op": "eq", "value": "student" }
+                ]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "attributes": { "role": "Student" } },
+    "expected": { "values": { "gate": { "type": "boolean", "value": false } } }
+  }
+]

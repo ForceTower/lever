@@ -6,6 +6,7 @@
   },
   "plugins": ["typescript", "import"],
   "rules": {
-    "typescript/no-explicit-any": "error"
+    "typescript/no-explicit-any": "error",
+    "typescript/consistent-return": "off"
   }
 }

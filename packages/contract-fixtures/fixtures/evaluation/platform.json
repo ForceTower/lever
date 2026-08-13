@@ -1,0 +1,140 @@
+[
+  {
+    "name": "platform eq matches",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android",
+                "clauses": [{ "kind": "platform", "op": "eq", "value": "android" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "android", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "platform eq is case-insensitive in both directions",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android",
+                "clauses": [{ "kind": "platform", "op": "eq", "value": "Android" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "ANDROID", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "platform eq mismatch falls back to default",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android",
+                "clauses": [{ "kind": "platform", "op": "eq", "value": "android" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "ios", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": false } } }
+  },
+  {
+    "name": "platform in matches membership case-insensitively",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "mobile",
+                "clauses": [{ "kind": "platform", "op": "in", "value": ["Android", "iOS"] }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "ios", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "platform in mismatch falls back to default",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "mobile",
+                "clauses": [{ "kind": "platform", "op": "in", "value": ["android", "ios"] }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "web", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": false } } }
+  },
+  {
+    "name": "missing platform never matches a platform clause",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "any-known-platform",
+                "clauses": [{ "kind": "platform", "op": "in", "value": ["android", "ios", "web"] }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": false } } }
+  }
+]

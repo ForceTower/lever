@@ -1,0 +1,187 @@
+[
+  {
+    "name": "first matching conditional value wins over a later match",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "banner": {
+          "type": "string",
+          "defaultValue": "default",
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android",
+                "clauses": [{ "kind": "platform", "op": "eq", "value": "android" }]
+              },
+              "value": "first"
+            },
+            {
+              "condition": {
+                "name": "mobile",
+                "clauses": [{ "kind": "platform", "op": "in", "value": ["android", "ios"] }]
+              },
+              "value": "second"
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "android", "attributes": {} },
+    "expected": { "values": { "banner": { "type": "string", "value": "first" } } }
+  },
+  {
+    "name": "a non-matching earlier entry falls through to a later match",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "banner": {
+          "type": "string",
+          "defaultValue": "default",
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "ios",
+                "clauses": [{ "kind": "platform", "op": "eq", "value": "ios" }]
+              },
+              "value": "first"
+            },
+            {
+              "condition": {
+                "name": "mobile",
+                "clauses": [{ "kind": "platform", "op": "in", "value": ["android", "ios"] }]
+              },
+              "value": "second"
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "android", "attributes": {} },
+    "expected": { "values": { "banner": { "type": "string", "value": "second" } } }
+  },
+  {
+    "name": "clauses AND together: one failing clause fails the condition",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android-5.2+",
+                "clauses": [
+                  { "kind": "platform", "op": "eq", "value": "android" },
+                  { "kind": "appVersion", "op": "gte", "value": "5.2.0" }
+                ]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "android", "appVersion": "5.1.0", "attributes": {} },
+    "expected": { "values": { "gate": { "type": "boolean", "value": false } } }
+  },
+  {
+    "name": "clauses AND together: all clauses matching matches the condition",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android-5.2-students",
+                "clauses": [
+                  { "kind": "platform", "op": "eq", "value": "android" },
+                  { "kind": "appVersion", "op": "gte", "value": "5.2.0" },
+                  { "kind": "attribute", "attribute": "role", "op": "eq", "value": "student" }
+                ]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": {
+      "platform": "android",
+      "appVersion": "5.2.0",
+      "attributes": { "role": "student" }
+    },
+    "expected": { "values": { "gate": { "type": "boolean", "value": true } } }
+  },
+  {
+    "name": "parameters resolve independently against the same context",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "android_gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android",
+                "clauses": [{ "kind": "platform", "op": "eq", "value": "android" }]
+              },
+              "value": true
+            }
+          ]
+        },
+        "ios_gate": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "ios",
+                "clauses": [{ "kind": "platform", "op": "eq", "value": "ios" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "android", "attributes": {} },
+    "expected": {
+      "values": {
+        "android_gate": { "type": "boolean", "value": true },
+        "ios_gate": { "type": "boolean", "value": false }
+      }
+    }
+  },
+  {
+    "name": "conditional values may override with any typed value, not only booleans",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "retry_config": {
+          "type": "json",
+          "defaultValue": { "attempts": 1 },
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android",
+                "clauses": [{ "kind": "platform", "op": "eq", "value": "android" }]
+              },
+              "value": { "attempts": 5, "backoffMs": [100, 500] }
+            }
+          ]
+        }
+      }
+    },
+    "context": { "platform": "android", "attributes": {} },
+    "expected": {
+      "values": {
+        "retry_config": { "type": "json", "value": { "attempts": 5, "backoffMs": [100, 500] } }
+      }
+    }
+  }
+]

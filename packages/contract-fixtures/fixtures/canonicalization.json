@@ -1,0 +1,57 @@
+[
+  {
+    "name": "keys sort by UTF-16 code units: uppercase before lowercase",
+    "value": { "b": 1, "a": 2, "A": 3 },
+    "canonical": "{\"A\":3,\"a\":2,\"b\":1}"
+  },
+  {
+    "name": "keys sort by UTF-16 code units: BMP before surrogate pairs",
+    "value": { "😀": "astral", "€": "bmp" },
+    "canonical": "{\"€\":\"bmp\",\"😀\":\"astral\"}"
+  },
+  {
+    "name": "numeric-looking keys sort as strings",
+    "value": { "10": null, "1": null, "2": null },
+    "canonical": "{\"1\":null,\"10\":null,\"2\":null}"
+  },
+  {
+    "name": "numbers serialize in ECMAScript shortest form",
+    "value": [1e21, 1e-7, 0.000001, 10.0, -0, 0.1],
+    "canonical": "[1e+21,1e-7,0.000001,10,0,0.1]"
+  },
+  {
+    "name": "strings use minimal escaping",
+    "value": { "text": "line\nbreak\ttab \"quote\" \\ back \u000b" },
+    "canonical": "{\"text\":\"line\\nbreak\\ttab \\\"quote\\\" \\\\ back \\u000b\"}"
+  },
+  {
+    "name": "no insignificant whitespace, nesting preserved",
+    "value": { "outer": { "z": [1, 2], "a": true }, "empty": {}, "list": [] },
+    "canonical": "{\"empty\":{},\"list\":[],\"outer\":{\"a\":true,\"z\":[1,2]}}"
+  },
+  {
+    "name": "snapshot bytes are pinned: this exact serialization is the published artifact",
+    "value": {
+      "format": 1,
+      "parameters": {
+        "enable_enrollment": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android-5.2+",
+                "clauses": [
+                  { "kind": "platform", "op": "eq", "value": "android" },
+                  { "kind": "appVersion", "op": "gte", "value": "5.2.0" }
+                ]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "canonical": "{\"format\":1,\"parameters\":{\"enable_enrollment\":{\"conditionalValues\":[{\"condition\":{\"clauses\":[{\"kind\":\"platform\",\"op\":\"eq\",\"value\":\"android\"},{\"kind\":\"appVersion\",\"op\":\"gte\",\"value\":\"5.2.0\"}],\"name\":\"android-5.2+\"},\"value\":true}],\"defaultValue\":false,\"type\":\"boolean\"}}}"
+  }
+]

@@ -1,0 +1,60 @@
+[
+  {
+    "name": "empty snapshot resolves to no values",
+    "snapshot": { "format": 1, "parameters": {} },
+    "context": { "attributes": {} },
+    "expected": { "values": {} }
+  },
+  {
+    "name": "empty context resolves every parameter to its typed default",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "enable_enrollment": { "type": "boolean", "defaultValue": false, "conditionalValues": [] },
+        "captcha_site_key": {
+          "type": "string",
+          "defaultValue": "6Lc-public",
+          "conditionalValues": []
+        },
+        "max_retries": { "type": "number", "defaultValue": 3, "conditionalValues": [] },
+        "menu_layout": {
+          "type": "json",
+          "defaultValue": { "rows": [1, 2], "compact": null },
+          "conditionalValues": []
+        }
+      }
+    },
+    "context": { "attributes": {} },
+    "expected": {
+      "values": {
+        "enable_enrollment": { "type": "boolean", "value": false },
+        "captcha_site_key": { "type": "string", "value": "6Lc-public" },
+        "max_retries": { "type": "number", "value": 3 },
+        "menu_layout": { "type": "json", "value": { "rows": [1, 2], "compact": null } }
+      }
+    }
+  },
+  {
+    "name": "empty context falls through conditional values to the default",
+    "snapshot": {
+      "format": 1,
+      "parameters": {
+        "enable_enrollment": {
+          "type": "boolean",
+          "defaultValue": false,
+          "conditionalValues": [
+            {
+              "condition": {
+                "name": "android",
+                "clauses": [{ "kind": "platform", "op": "eq", "value": "android" }]
+              },
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "context": { "attributes": {} },
+    "expected": { "values": { "enable_enrollment": { "type": "boolean", "value": false } } }
+  }
+]
