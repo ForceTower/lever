@@ -10,7 +10,8 @@
     "fix": "oxlint --type-aware --fix && oxfmt .",
     "fmt": "oxfmt .",
     "lint": "oxlint --type-aware",
-    "test": "bun test"
+    "test": "bun test",
+    "fixtures:update": "LEVER_UPDATE_FIXTURES=1 bun test apps/api/src/api/http-fixtures.test.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

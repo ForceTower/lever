@@ -1,0 +1,118 @@
+{
+  "name": "resolve-empty-context",
+  "description": "A context with no targeting inputs beyond the platform: every conditional value falls through and the environment resolves to its defaults. `clientId` is always sent — it is the installation identifier, not a targeting input.",
+  "setup": {
+    "conditions": [
+      {
+        "name": "android",
+        "clauses": [
+          {
+            "kind": "platform",
+            "op": "eq",
+            "value": "android"
+          }
+        ]
+      },
+      {
+        "name": "beta",
+        "clauses": [
+          {
+            "kind": "attribute",
+            "attribute": "channel",
+            "op": "eq",
+            "value": "beta"
+          }
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "key": "enable_enrollment",
+        "type": "boolean",
+        "defaultValue": false,
+        "conditionalValues": [
+          {
+            "condition": "android",
+            "value": true
+          }
+        ]
+      },
+      {
+        "key": "greeting",
+        "type": "string",
+        "defaultValue": "hello",
+        "conditionalValues": [
+          {
+            "condition": "beta",
+            "value": "hey"
+          }
+        ]
+      },
+      {
+        "key": "max_retries",
+        "type": "number",
+        "defaultValue": 3,
+        "conditionalValues": []
+      }
+    ],
+    "publish": true
+  },
+  "steps": [
+    {
+      "request": {
+        "path": "/v1/resolve",
+        "context": {
+          "platform": "ios",
+          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "attributes": {}
+        },
+        "query": "platform=ios&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c"
+      },
+      "response": {
+        "status": 200,
+        "etag": "\"68193faff823593e\"",
+        "body": {
+          "values": {
+            "enable_enrollment": {
+              "type": "boolean",
+              "value": false
+            },
+            "greeting": {
+              "type": "string",
+              "value": "hello"
+            },
+            "max_retries": {
+              "type": "number",
+              "value": 3
+            }
+          },
+          "version": 1
+        }
+      },
+      "expect": {
+        "activatedVersion": 1,
+        "changed": true,
+        "reads": [
+          {
+            "key": "enable_enrollment",
+            "type": "boolean",
+            "default": true,
+            "expected": false
+          },
+          {
+            "key": "greeting",
+            "type": "string",
+            "default": "none",
+            "expected": "hello"
+          },
+          {
+            "key": "max_retries",
+            "type": "int",
+            "default": 1,
+            "expected": 3
+          }
+        ]
+      }
+    }
+  ]
+}

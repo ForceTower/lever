@@ -1,0 +1,87 @@
+{
+  "name": "resolve-repeat-304",
+  "description": "A second fetch sends the stored validator and the server answers 304: freshness is refreshed, values and version are untouched.",
+  "setup": {
+    "conditions": [],
+    "parameters": [
+      {
+        "key": "enable_enrollment",
+        "type": "boolean",
+        "defaultValue": true,
+        "conditionalValues": []
+      }
+    ],
+    "publish": true
+  },
+  "steps": [
+    {
+      "request": {
+        "path": "/v1/resolve",
+        "context": {
+          "platform": "ios",
+          "appVersion": "1.0.0",
+          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "attributes": {}
+        },
+        "query": "platform=ios&appVersion=1.0.0&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c"
+      },
+      "response": {
+        "status": 200,
+        "etag": "\"60495a641acfc844\"",
+        "body": {
+          "values": {
+            "enable_enrollment": {
+              "type": "boolean",
+              "value": true
+            }
+          },
+          "version": 1
+        }
+      },
+      "expect": {
+        "activatedVersion": 1,
+        "changed": true,
+        "reads": [
+          {
+            "key": "enable_enrollment",
+            "type": "boolean",
+            "default": false,
+            "expected": true
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "path": "/v1/resolve",
+        "context": {
+          "platform": "ios",
+          "appVersion": "1.0.0",
+          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "attributes": {}
+        },
+        "query": "platform=ios&appVersion=1.0.0&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+        "ifNoneMatch": {
+          "fromStep": 1
+        }
+      },
+      "response": {
+        "status": 304,
+        "etag": "\"60495a641acfc844\"",
+        "body": null
+      },
+      "expect": {
+        "activatedVersion": 1,
+        "changed": false,
+        "reads": [
+          {
+            "key": "enable_enrollment",
+            "type": "boolean",
+            "default": false,
+            "expected": true
+          }
+        ]
+      }
+    }
+  ]
+}

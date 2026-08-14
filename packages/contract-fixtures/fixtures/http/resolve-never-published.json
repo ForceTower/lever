@@ -1,0 +1,43 @@
+{
+  "name": "resolve-never-published",
+  "description": "A valid key for an environment that was never published resolves 200 {version: 0, values: {}} — not 401. Activating it commits version 0, so activatedVersion is 0 and never sticks at null.",
+  "setup": {
+    "conditions": [],
+    "parameters": [],
+    "publish": false
+  },
+  "steps": [
+    {
+      "request": {
+        "path": "/v1/resolve",
+        "context": {
+          "platform": "ios",
+          "appVersion": "1.0.0",
+          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "attributes": {}
+        },
+        "query": "platform=ios&appVersion=1.0.0&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c"
+      },
+      "response": {
+        "status": 200,
+        "etag": "\"bc82c9e7976882cc\"",
+        "body": {
+          "values": {},
+          "version": 0
+        }
+      },
+      "expect": {
+        "activatedVersion": 0,
+        "changed": false,
+        "reads": [
+          {
+            "key": "enable_enrollment",
+            "type": "boolean",
+            "default": false,
+            "expected": false
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,141 @@
+{
+  "name": "resolve-type-mismatch",
+  "description": "Every read whose declared type contradicts the published wire type falls back to its code default: wrong wire type, a fractional number read as an integer, a number outside Int range, and a json payload that fails to decode. The fetch itself succeeds — a mismatch is a read-time floor, never an error.",
+  "setup": {
+    "conditions": [],
+    "parameters": [
+      {
+        "key": "enable_enrollment",
+        "type": "boolean",
+        "defaultValue": true,
+        "conditionalValues": []
+      },
+      {
+        "key": "greeting",
+        "type": "string",
+        "defaultValue": "hello",
+        "conditionalValues": []
+      },
+      {
+        "key": "sample_rate",
+        "type": "number",
+        "defaultValue": 3.5,
+        "conditionalValues": []
+      },
+      {
+        "key": "huge",
+        "type": "number",
+        "defaultValue": 100000000000000000000,
+        "conditionalValues": []
+      },
+      {
+        "key": "paywall",
+        "type": "json",
+        "defaultValue": {
+          "headline": "Go Pro",
+          "trialDays": 7
+        },
+        "conditionalValues": []
+      }
+    ],
+    "publish": true
+  },
+  "steps": [
+    {
+      "request": {
+        "path": "/v1/resolve",
+        "context": {
+          "platform": "ios",
+          "appVersion": "1.0.0",
+          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "attributes": {}
+        },
+        "query": "platform=ios&appVersion=1.0.0&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c"
+      },
+      "response": {
+        "status": 200,
+        "etag": "\"71f7ba490d39cce0\"",
+        "body": {
+          "values": {
+            "enable_enrollment": {
+              "type": "boolean",
+              "value": true
+            },
+            "greeting": {
+              "type": "string",
+              "value": "hello"
+            },
+            "huge": {
+              "type": "number",
+              "value": 100000000000000000000
+            },
+            "paywall": {
+              "type": "json",
+              "value": {
+                "headline": "Go Pro",
+                "trialDays": 7
+              }
+            },
+            "sample_rate": {
+              "type": "number",
+              "value": 3.5
+            }
+          },
+          "version": 1
+        }
+      },
+      "expect": {
+        "activatedVersion": 1,
+        "changed": true,
+        "reads": [
+          {
+            "key": "enable_enrollment",
+            "type": "string",
+            "default": "fallback",
+            "expected": "fallback"
+          },
+          {
+            "key": "greeting",
+            "type": "boolean",
+            "default": false,
+            "expected": false
+          },
+          {
+            "key": "sample_rate",
+            "type": "int",
+            "default": 1,
+            "expected": 1
+          },
+          {
+            "key": "sample_rate",
+            "type": "double",
+            "default": 1.5,
+            "expected": 3.5
+          },
+          {
+            "key": "huge",
+            "type": "int",
+            "default": 7,
+            "expected": 7
+          },
+          {
+            "key": "paywall",
+            "type": "json",
+            "default": {
+              "headline": "fallback"
+            },
+            "expected": {
+              "headline": "fallback"
+            }
+          },
+          {
+            "key": "enable_enrollment",
+            "type": "boolean",
+            "default": false,
+            "expected": true
+          }
+        ]
+      }
+    }
+  ]
+}

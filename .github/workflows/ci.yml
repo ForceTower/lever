@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .mise.toml
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run check
+
+      # Includes the contract fixtures, verified against the real service
+      # (spec 0002 §10.4) — a drifted tape fails here, not at SDK release.
+      - run: bun test

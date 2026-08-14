@@ -1,0 +1,166 @@
+{
+  "name": "resolve-fresh-200",
+  "description": "First fetch of a published environment: a 200 with a strong ETag stages version 1, and activation serves the conditionally resolved values.",
+  "setup": {
+    "conditions": [
+      {
+        "name": "ios-5.2+",
+        "clauses": [
+          {
+            "kind": "platform",
+            "op": "eq",
+            "value": "ios"
+          },
+          {
+            "kind": "appVersion",
+            "op": "gte",
+            "value": "5.2.0"
+          }
+        ]
+      },
+      {
+        "name": "pt",
+        "clauses": [
+          {
+            "kind": "attribute",
+            "attribute": "locale",
+            "op": "eq",
+            "value": "pt-BR"
+          }
+        ]
+      }
+    ],
+    "parameters": [
+      {
+        "key": "enable_enrollment",
+        "type": "boolean",
+        "defaultValue": false,
+        "conditionalValues": [
+          {
+            "condition": "ios-5.2+",
+            "value": true
+          }
+        ]
+      },
+      {
+        "key": "greeting",
+        "type": "string",
+        "defaultValue": "hello",
+        "conditionalValues": [
+          {
+            "condition": "pt",
+            "value": "olá"
+          }
+        ]
+      },
+      {
+        "key": "max_retries",
+        "type": "number",
+        "defaultValue": 3,
+        "conditionalValues": []
+      },
+      {
+        "key": "paywall",
+        "type": "json",
+        "defaultValue": {
+          "headline": "Go Pro",
+          "cta": "Start trial"
+        },
+        "conditionalValues": []
+      }
+    ],
+    "publish": true
+  },
+  "steps": [
+    {
+      "request": {
+        "path": "/v1/resolve",
+        "context": {
+          "platform": "ios",
+          "appVersion": "5.2.0",
+          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "attributes": {
+            "locale": "pt-BR",
+            "tier": "free trial"
+          }
+        },
+        "query": "platform=ios&appVersion=5.2.0&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c&attr.locale=pt-BR&attr.tier=free%20trial"
+      },
+      "response": {
+        "status": 200,
+        "etag": "\"4665329db5d5bec0\"",
+        "body": {
+          "values": {
+            "enable_enrollment": {
+              "type": "boolean",
+              "value": true
+            },
+            "greeting": {
+              "type": "string",
+              "value": "olá"
+            },
+            "max_retries": {
+              "type": "number",
+              "value": 3
+            },
+            "paywall": {
+              "type": "json",
+              "value": {
+                "cta": "Start trial",
+                "headline": "Go Pro"
+              }
+            }
+          },
+          "version": 1
+        }
+      },
+      "expect": {
+        "activatedVersion": 1,
+        "changed": true,
+        "reads": [
+          {
+            "key": "enable_enrollment",
+            "type": "boolean",
+            "default": false,
+            "expected": true
+          },
+          {
+            "key": "greeting",
+            "type": "string",
+            "default": "none",
+            "expected": "olá"
+          },
+          {
+            "key": "max_retries",
+            "type": "int",
+            "default": 1,
+            "expected": 3
+          },
+          {
+            "key": "max_retries",
+            "type": "double",
+            "default": 1.5,
+            "expected": 3
+          },
+          {
+            "key": "paywall",
+            "type": "json",
+            "default": {
+              "headline": "fallback"
+            },
+            "expected": {
+              "headline": "Go Pro",
+              "cta": "Start trial"
+            }
+          },
+          {
+            "key": "not_published",
+            "type": "string",
+            "default": "default",
+            "expected": "default"
+          }
+        ]
+      }
+    }
+  ]
+}

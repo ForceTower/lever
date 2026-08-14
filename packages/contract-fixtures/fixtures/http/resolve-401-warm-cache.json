@@ -1,0 +1,116 @@
+{
+  "name": "resolve-401-warm-cache",
+  "description": "The environment's key is rotated after a successful activation. The client still sends the old key and gets 401 — the warm cache keeps serving and the activated version is untouched.",
+  "setup": {
+    "conditions": [],
+    "parameters": [
+      {
+        "key": "enable_enrollment",
+        "type": "boolean",
+        "defaultValue": true,
+        "conditionalValues": []
+      },
+      {
+        "key": "greeting",
+        "type": "string",
+        "defaultValue": "hello",
+        "conditionalValues": []
+      }
+    ],
+    "publish": true
+  },
+  "steps": [
+    {
+      "request": {
+        "path": "/v1/resolve",
+        "context": {
+          "platform": "ios",
+          "appVersion": "1.0.0",
+          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "attributes": {}
+        },
+        "query": "platform=ios&appVersion=1.0.0&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c"
+      },
+      "response": {
+        "status": 200,
+        "etag": "\"5b06166c2e6416d4\"",
+        "body": {
+          "values": {
+            "enable_enrollment": {
+              "type": "boolean",
+              "value": true
+            },
+            "greeting": {
+              "type": "string",
+              "value": "hello"
+            }
+          },
+          "version": 1
+        }
+      },
+      "expect": {
+        "activatedVersion": 1,
+        "changed": true,
+        "reads": [
+          {
+            "key": "enable_enrollment",
+            "type": "boolean",
+            "default": false,
+            "expected": true
+          },
+          {
+            "key": "greeting",
+            "type": "string",
+            "default": "none",
+            "expected": "hello"
+          }
+        ]
+      }
+    },
+    {
+      "before": "rotate-key",
+      "request": {
+        "path": "/v1/resolve",
+        "context": {
+          "platform": "ios",
+          "appVersion": "1.0.0",
+          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "attributes": {}
+        },
+        "query": "platform=ios&appVersion=1.0.0&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+        "ifNoneMatch": {
+          "fromStep": 1
+        }
+      },
+      "response": {
+        "status": 401,
+        "etag": null,
+        "body": {
+          "error": {
+            "code": "invalid_key",
+            "message": "unknown client key"
+          }
+        }
+      },
+      "expect": {
+        "error": "invalidKey",
+        "activatedVersion": 1,
+        "changed": false,
+        "reads": [
+          {
+            "key": "enable_enrollment",
+            "type": "boolean",
+            "default": false,
+            "expected": true
+          },
+          {
+            "key": "greeting",
+            "type": "string",
+            "default": "none",
+            "expected": "hello"
+          }
+        ]
+      }
+    }
+  ]
+}
