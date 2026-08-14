@@ -1,4 +1,7 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { Hono } from "hono";
+import { serveStatic } from "hono/bun";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import packageJson from "../package.json";
@@ -58,6 +61,14 @@ export function createApp(env: Env): Hono<AppEnv> {
   app.route("/v1/stream", createStreamRoutes(env.streams, env.resolveCache));
 
   app.route("/v1/admin", createAdminRoutes(env));
+
+  // §9.4: the same container serves the dashboard's built SPA — a no-op
+  // until the dashboard spec fills apps/admin/dist. Mounted last so /v1 and
+  // /healthz misses still fall through to the JSON 404.
+  const adminDist = join(import.meta.dir, "../../admin/dist");
+  if (existsSync(adminDist)) {
+    app.get("/*", serveStatic({ root: adminDist }));
+  }
 
   return app;
 }

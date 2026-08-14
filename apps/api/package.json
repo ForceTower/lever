@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "migrate": "bun run src/migrate.ts"
   },
   "dependencies": {
     "@loglayer/transport-pino": "^3.3.0",
