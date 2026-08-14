@@ -1,0 +1,30 @@
+name: redeploy
+
+# Manually trigger a Portainer redeploy of the lever stack without rebuilding
+# the image. Useful for testing the Cloudflare-Access-gated webhook and for
+# forcing a re-pull on demand.
+on:
+  workflow_dispatch:
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Portainer redeploy
+        env:
+          WEBHOOK: ${{ secrets.PORTAINER_WEBHOOK_URL }}
+          CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::error::PORTAINER_WEBHOOK_URL not set."; exit 1
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$WEBHOOK" \
+            -H "CF-Access-Client-Id: $CF_ID" \
+            -H "CF-Access-Client-Secret: $CF_SECRET")
+          echo "Portainer webhook responded HTTP $code"
+          case "$code" in
+            2*) echo "Redeploy triggered." ;;
+            30*) echo "::error::Redirect ($code) - Cloudflare Access rejected the service token."; exit 1 ;;
+            *)  echo "::error::Webhook failed (HTTP $code)."; exit 1 ;;
+          esac
