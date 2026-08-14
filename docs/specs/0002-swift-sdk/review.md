@@ -417,26 +417,40 @@ milestones where the relevant behavior first appears rather than deferred to M8.
    valuable because strict-concurrency and isolation choices are the hardest API
    decisions to reverse.
 
-## 6. Suggested disposition checklist
+## 6. Disposition checklist (resolved 2026-08-14)
 
-Before changing plan status from `not started`, record a decision for each item:
+Every finding was accepted and folded into [spec 0002](./spec.md) and
+[plan 0002](./plan.md); the F13 wording conflict was also fixed in spec 0001 §7.
+Two items were deliberately scoped rather than fully adopted:
 
-- [ ] Stable environment/cache namespace and context identity
-- [ ] Installation/client identity across rotation and contexts
-- [ ] App Group writer/reader model and watch-device scope
-- [ ] Cache-only or automatic-networking opt-out
-- [ ] Zero, negative, and failed-fetch interval semantics
-- [ ] Wall-clock versus monotonic-clock seams
-- [ ] Metadata-only activation and version-0 semantics
-- [ ] Pending nudge during in-flight fetch
-- [ ] Synchronous client core versus runtime actor ownership
-- [ ] Runtime/session lifetime and cancellation
-- [ ] Full wire-limit mirroring and deterministic attribute dropping
-- [ ] Complete cache schema and ETag invariants
-- [ ] No-callout-under-lock discipline
-- [ ] Type-aware JSON memoization
-- [ ] Consumer compilation under both default-isolation modes
-- [ ] Transport edge-case and cancellation matrix
+- **Cache-only mode (F6):** initially deferred to spec §11 open questions.
+  *Superseded by pass 2 (P2-F3):* the single-writer topology was not expressible
+  without it, so v1 adopted `automaticUpdates = false` (spec §5, §7).
+- **Exact log-message catalog (§4/M2):** rejected — tests assert level and dedupe
+  identity, not exact strings, so no catalog is needed.
 
-Once those are settled, the existing eleven-milestone plan remains a good delivery
-structure; it needs amendments, not a wholesale redesign.
+- [x] Stable environment/cache namespace and context identity — spec §7
+  (`cacheNamespace`, canonical base URL, context deliberately excluded)
+- [x] Installation/client identity across rotation and contexts — spec §7
+  (`identity.json`, per-directory `clientId`)
+- [x] App Group writer/reader model and watch-device scope — spec §7, §9
+- [x] Cache-only or automatic-networking opt-out — deferred, then adopted in
+  pass 2 as `automaticUpdates` (spec §5)
+- [x] Zero, negative, and failed-fetch interval semantics — spec §3, §5.1
+  (60 s timer floor, re-arm from attempt)
+- [x] Wall-clock versus monotonic-clock seams — spec §5.1, §10
+- [x] Metadata-only activation and version-0 semantics — spec §4
+- [x] Pending nudge during in-flight fetch — spec §5.3
+- [x] Synchronous client core versus runtime actor ownership — spec §4.1
+- [x] Runtime/session lifetime and cancellation — spec §4.1
+- [x] Full wire-limit mirroring and deterministic attribute dropping — spec §3
+  (UTF-16 lengths, sorted-name selection, omission of overlong reserved fields)
+- [x] Complete cache schema and ETag invariants — spec §6.1, §7
+- [x] No-callout-under-lock discipline — spec §4.1
+- [x] Type-aware JSON memoization — spec §2.3
+- [x] Consumer compilation under both default-isolation modes — spec §1, plan M1
+- [x] Transport edge-case and cancellation matrix — spec §5.1, §6.1
+
+The plan's sequencing recommendations (§5) were adopted: the spec resolutions
+above land before M1, M9 moves ahead of M5, the fetch-operation half of the nudge
+state machine lands in M5, and M1 gained the platform/isolation spike.

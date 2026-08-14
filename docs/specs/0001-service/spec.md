@@ -457,9 +457,11 @@ SSE nudges (research §3.2, §4.3). Same client-key auth as §6.1.
 - No replay/`Last-Event-ID` machinery: the connect-time emission plus the SDK's dedupe
   ("already at N → ignore", research §3.2) make the stream stateless. The dedupe
   contract is **identity, not ordering**: the wire version is an opaque change token —
-  the SDK fetches whenever the announced version *differs* from its last activated
-  one, and updates its own notion of current only from fetch responses, never from
-  nudge frames. Equality (not `≤`) keeps clients self-healing when the sequence is not
+  the SDK fetches whenever the announced version *differs* from its **last known**
+  one — the version of the newest successfully fetched representation it holds,
+  staged or activated (with activation deferred, a fetched-but-unactivated version
+  already suppresses repeat nudges) — and updates its own notion of current only
+  from fetch responses, never from nudge frames. Equality (not `≤`) keeps clients self-healing when the sequence is not
   monotonic — a database restored from backup, an environment deleted and recreated —
   and prices any stale or duplicate frame (including the connect interleaving above)
   at exactly one fetch that 304s.
