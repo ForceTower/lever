@@ -18,6 +18,7 @@ export interface TestRequestInit {
   body?: unknown;
   /** Defaults to the admin secret; `null` sends no Authorization header. */
   token?: string | null;
+  headers?: Record<string, string>;
 }
 
 export interface TestApp {
@@ -27,18 +28,21 @@ export interface TestApp {
 }
 
 /** `dbPath` other than `:memory:` lets a test open a second handle on the same file. */
-export function createTestApp(dbPath = ":memory:"): TestApp {
+export function createTestApp(
+  options: { dbPath?: string; vars?: Record<string, string> } = {},
+): TestApp {
   initLogger("error");
   const vars = envVarsSchema.parse({
     LEVER_ADMIN_TOKENS: `${TEST_ADMIN_NAME}:${TEST_ADMIN_SECRET}`,
+    ...options.vars,
   });
-  const db = openDb(dbPath);
+  const db = openDb(options.dbPath ?? ":memory:");
   runMigrations(db);
   const env = buildEnv(vars, db);
   const app = createApp(env);
 
   const request = async (path: string, init: TestRequestInit = {}) => {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...init.headers };
     if (init.token !== null) headers.Authorization = `Bearer ${init.token ?? TEST_ADMIN_SECRET}`;
     const hasBody = init.body !== undefined;
     if (hasBody) headers["Content-Type"] = "application/json";

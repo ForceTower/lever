@@ -2,11 +2,14 @@ import { Hono } from "hono";
 import { validator } from "hono/validator";
 import { z } from "zod";
 import { LeverError } from "../error";
+import type { CompiledEnv } from "../service/resolve-cache";
 
 export interface AppVariables {
   requestId: string;
   /** Set by adminAuth; becomes `versions.author` on publish (§8.1). */
   adminName: string;
+  /** Set by clientKeyAuth on the resolve/stream surface (§6.1). */
+  compiledEnv: CompiledEnv;
 }
 
 export type AppEnv = { Variables: AppVariables };

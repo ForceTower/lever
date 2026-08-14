@@ -24,6 +24,9 @@ export interface ResolvedValue {
 export function evaluate(
   snapshot: Snapshot,
   context: ResolveContext,
+  // The resolve cache pre-parses clause operands at compile time (§6.4);
+  // without it, operands parse on the fly — same result, fixtures unaffected.
+  semverOperands?: ReadonlyMap<string, Semver>,
 ): Record<string, ResolvedValue> {
   if (snapshot.format !== SNAPSHOT_FORMAT) {
     throw new Error(`unsupported snapshot format: ${String(snapshot.format)}`);
@@ -35,7 +38,9 @@ export function evaluate(
   for (const [key, parameter] of Object.entries(snapshot.parameters)) {
     // First matching conditional value wins; default is the floor.
     const match = parameter.conditionalValues.find(({ condition }) =>
-      condition.clauses.every((clause) => matchesClause(clause, platform, appVersion, context)),
+      condition.clauses.every((clause) =>
+        matchesClause(clause, platform, appVersion, context, semverOperands),
+      ),
     );
     values[key] = { type: parameter.type, value: match?.value ?? parameter.defaultValue };
   }
@@ -51,6 +56,7 @@ function matchesClause(
   platform: string | undefined,
   appVersion: Semver | undefined,
   context: ResolveContext,
+  semverOperands?: ReadonlyMap<string, Semver>,
 ): boolean {
   switch (clause.kind) {
     case "platform": {
@@ -60,7 +66,7 @@ function matchesClause(
     }
     case "appVersion": {
       if (appVersion === undefined) return false;
-      const operand = parseSemver(clause.value);
+      const operand = semverOperands?.get(clause.value) ?? parseSemver(clause.value);
       if (operand === undefined) return false; // unreachable for validated snapshots
       const order = compareSemver(appVersion, operand);
       return {

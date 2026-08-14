@@ -7,7 +7,8 @@ import { createEnvironmentsService, type EnvironmentsService } from "./service/a
 import { createParametersService, type ParametersService } from "./service/admin/parameters";
 import { createProjectsService, type ProjectsService } from "./service/admin/projects";
 import { createPublishService, type PublishService } from "./service/publish";
-import { createNoopResolveCache, type ResolveCache } from "./service/resolve-cache";
+import { createResolveCache, type ResolveCache } from "./service/resolve-cache";
+import { createStreamRegistry, type StreamRegistry } from "./service/stream";
 
 export interface AdminToken {
   name: string;
@@ -68,6 +69,7 @@ export interface Env {
   /** The Kysely instance every query goes through. */
   db: Db;
   repos: Repos;
+  streams: StreamRegistry;
   resolveCache: ResolveCache;
   services: {
     projects: ProjectsService;
@@ -78,20 +80,23 @@ export interface Env {
   };
 }
 
-// The no-op cache stands in until Phase 5 implements §6.4; the services
-// already notify it through their single mutation code paths.
-export function buildEnv(
-  vars: EnvVars,
-  sqlite: Database,
-  resolveCache: ResolveCache = createNoopResolveCache(),
-): Env {
+// Callers warm the cache after construction (`env.resolveCache.warmUp`) —
+// boot does it before listening; tests build over an empty database, where the
+// mutation hooks keep the cache current from the first write.
+export function buildEnv(vars: EnvVars, sqlite: Database): Env {
   const db = createDb(sqlite);
   const repos = createRepos(db);
+  const streams = createStreamRegistry({
+    heartbeatMs: vars.SSE_HEARTBEAT_MS,
+    maxSubscribers: vars.SSE_MAX_SUBSCRIBERS,
+  });
+  const resolveCache = createResolveCache(streams);
   return {
     vars,
     sqlite,
     db,
     repos,
+    streams,
     resolveCache,
     services: {
       projects: createProjectsService(repos, resolveCache),

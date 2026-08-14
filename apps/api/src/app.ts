@@ -1,9 +1,12 @@
 import type { Hono } from "hono";
+import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import packageJson from "../package.json";
 import { createAdminRoutes } from "./api/admin/index";
 import { createHono, type AppEnv } from "./api/index";
 import { requestContext } from "./api/middleware";
+import { createResolveRoutes } from "./api/resolve";
+import { createStreamRoutes } from "./api/stream";
 import type { Env } from "./env";
 import { LeverError } from "./error";
 import { getLogger } from "./logger";
@@ -40,6 +43,19 @@ export function createApp(env: Env): Hono<AppEnv> {
   app.notFound(() => errorResponse(404, "not_found", "route not found"));
 
   app.get("/healthz", (c) => c.json({ name: "lever", version: packageJson.version }));
+
+  // §5 CORS: the public read surface answers cross-origin browsers; ETag must
+  // be exposed or the 304 path silently degrades to full refetches. /v1/admin
+  // gets no CORS — the dashboard is served same-origin (§9.4).
+  const origins = env.vars.LEVER_ALLOWED_ORIGINS;
+  const readCors = cors({
+    origin: origins === "*" ? "*" : origins.split(",").map((origin) => origin.trim()),
+    exposeHeaders: ["ETag"],
+  });
+  app.use("/v1/resolve", readCors);
+  app.use("/v1/stream", readCors);
+  app.route("/v1/resolve", createResolveRoutes(env.resolveCache));
+  app.route("/v1/stream", createStreamRoutes(env.streams, env.resolveCache));
 
   app.route("/v1/admin", createAdminRoutes(env));
 

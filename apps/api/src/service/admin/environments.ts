@@ -50,7 +50,9 @@ export function createEnvironmentsService(
     async create(projectId, key) {
       await ensureProject(projectId);
       try {
-        return await repos.environments.create({ projectId, key });
+        const environment = await repos.environments.create({ projectId, key });
+        resolveCache.environmentCreated(environment);
+        return environment;
       } catch (error) {
         if (isConstraintError(error)) {
           throw new LeverError(

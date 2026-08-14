@@ -112,7 +112,7 @@ describe("publish", () => {
   test("a held write lock maps to 409 publish_conflict, never a 500", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lever-publish-test-"));
     try {
-      const { request, env } = createTestApp(join(dir, "test.db"));
+      const { request, env } = createTestApp({ dbPath: join(dir, "test.db") });
       const { environment } = await seed(request);
       env.sqlite.exec("PRAGMA busy_timeout = 100");
 

@@ -3,6 +3,7 @@ import type { MiddlewareHandler } from "hono";
 import type { AdminToken } from "../env";
 import { LeverError } from "../error";
 import { getLogger, runWithLogger } from "../logger";
+import type { ResolveCache } from "../service/resolve-cache";
 import type { AppEnv } from "./index";
 
 /** Binds a request id to the AsyncLocalStorage logger context (§9.2). */
@@ -38,6 +39,28 @@ export function adminAuth(tokens: AdminToken[]): MiddlewareHandler<AppEnv> {
       throw new LeverError(401, "unauthorized", "missing or invalid admin token");
     }
     c.set("adminName", matched.name);
+    await next();
+  };
+}
+
+/**
+ * §6.1 client-key auth for resolve and stream: `Authorization: Bearer pk_…`
+ * or, for EventSource-style clients that cannot set headers, `?key=pk_…`.
+ * The lookup is the cache's auth index — no I/O. Client keys authorize
+ * exactly this read surface for one environment (research §7).
+ */
+export function clientKeyAuth(cache: ResolveCache): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const header = c.req.header("Authorization");
+    const clientKey =
+      header?.startsWith("Bearer ") === true
+        ? header.slice("Bearer ".length)
+        : (c.req.query("key") ?? "");
+    const compiledEnv = cache.getByClientKey(clientKey);
+    if (compiledEnv === undefined) {
+      throw new LeverError(401, "invalid_key", "unknown client key");
+    }
+    c.set("compiledEnv", compiledEnv);
     await next();
   };
 }
