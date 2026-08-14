@@ -1,6 +1,6 @@
 # Spec 0001 — The service
 
-- **Status:** draft
+- **Status:** implemented
 - **Research:** [0001 — product scope](../../research/0001-product-scope/research.md)
 - **Scope:** the backend service only — SQLite schema, resolve/stream endpoints, admin
   REST, auth, and the cross-cutting plumbing (research §8). The dashboard and the three
