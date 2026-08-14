@@ -9,7 +9,10 @@ COPY apps/api/package.json apps/api/
 COPY apps/admin/package.json apps/admin/
 COPY packages/sdk-ts/package.json packages/sdk-ts/
 COPY packages/contract-fixtures/package.json packages/contract-fixtures/
-RUN bun install --frozen-lockfile --production
+# Hoisted linker: everything lands in the root node_modules, which is the one
+# directory the runtime stage copies. Bun's default isolated layout would
+# scatter per-workspace node_modules the copy below misses.
+RUN bun install --frozen-lockfile --production --linker=hoisted
 
 FROM oven/bun:1-slim
 WORKDIR /app
