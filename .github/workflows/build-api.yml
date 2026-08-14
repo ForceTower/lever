@@ -93,6 +93,10 @@ jobs:
             additions=$(jq -c --arg path "$file" --arg contents "$(printf '%s\n' "$new" | base64 -w0)" \
               '. + [{path: $path, contents: $contents}]' <<<"$additions")
           done
+          if [ "$(jq length <<<"$additions")" -eq 0 ]; then
+            echo "::error::could not read any deploy compose from ${REPO} - check HOMELAB_DEPLOY_PAT scopes (needs contents read+write on ${REPO})."
+            exit 1
+          fi
           if [ "$changed" -eq 0 ]; then
             echo "deploy composes already at ${tag}; nothing to commit."
             exit 0
