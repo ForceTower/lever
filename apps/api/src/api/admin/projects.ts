@@ -10,20 +10,22 @@ const patchBodySchema = z.strictObject({ name: displayNameSchema });
 export function createProjectRoutes(projects: ProjectsService): Hono<AppEnv> {
   const app = createHono();
 
-  app.get("/projects", (c) => c.json(projects.list()));
+  app.get("/projects", async (c) => c.json(await projects.list()));
 
-  app.post("/projects", zValidator("json", createBodySchema), (c) =>
-    c.json(projects.create(c.req.valid("json")), 201),
+  app.post("/projects", zValidator("json", createBodySchema), async (c) =>
+    c.json(await projects.create(c.req.valid("json")), 201),
   );
 
-  app.get("/projects/:projectId", (c) => c.json(projects.get(c.req.param("projectId"))));
-
-  app.patch("/projects/:projectId", zValidator("json", patchBodySchema), (c) =>
-    c.json(projects.rename(c.req.param("projectId"), c.req.valid("json").name)),
+  app.get("/projects/:projectId", async (c) =>
+    c.json(await projects.get(c.req.param("projectId"))),
   );
 
-  app.delete("/projects/:projectId", zValidator("json", confirmBodySchema), (c) => {
-    projects.remove(c.req.param("projectId"), c.req.valid("json").confirm);
+  app.patch("/projects/:projectId", zValidator("json", patchBodySchema), async (c) =>
+    c.json(await projects.rename(c.req.param("projectId"), c.req.valid("json").name)),
+  );
+
+  app.delete("/projects/:projectId", zValidator("json", confirmBodySchema), async (c) => {
+    await projects.remove(c.req.param("projectId"), c.req.valid("json").confirm);
     return c.body(null, 204);
   });
 

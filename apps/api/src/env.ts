@@ -1,11 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
-import { openDb } from "./db";
-import { createConditionRepo, type ConditionRepo } from "./db/condition-repo";
-import { createEnvironmentRepo, type EnvironmentRepo } from "./db/environment-repo";
-import { createParameterRepo, type ParameterRepo } from "./db/parameter-repo";
-import { createProjectRepo, type ProjectRepo } from "./db/project-repo";
-import { createVersionRepo, type VersionRepo } from "./db/version-repo";
+import { createDb, createRepos, openDb, type Db, type Repos } from "./db";
 import { initLogger } from "./logger";
 import { createConditionsService, type ConditionsService } from "./service/admin/conditions";
 import { createEnvironmentsService, type EnvironmentsService } from "./service/admin/environments";
@@ -68,14 +63,11 @@ export type EnvVars = z.infer<typeof envVarsSchema>;
 
 export interface Env {
   vars: EnvVars;
-  db: Database;
-  repos: {
-    projects: ProjectRepo;
-    environments: EnvironmentRepo;
-    conditions: ConditionRepo;
-    parameters: ParameterRepo;
-    versions: VersionRepo;
-  };
+  /** The raw bun:sqlite handle — pragmas, migrations, backups. */
+  sqlite: Database;
+  /** The Kysely instance every query goes through. */
+  db: Db;
+  repos: Repos;
   resolveCache: ResolveCache;
   services: {
     projects: ProjectsService;
@@ -90,18 +82,14 @@ export interface Env {
 // already notify it through their single mutation code paths.
 export function buildEnv(
   vars: EnvVars,
-  db: Database,
+  sqlite: Database,
   resolveCache: ResolveCache = createNoopResolveCache(),
 ): Env {
-  const repos = {
-    projects: createProjectRepo(db),
-    environments: createEnvironmentRepo(db),
-    conditions: createConditionRepo(db),
-    parameters: createParameterRepo(db),
-    versions: createVersionRepo(db),
-  };
+  const db = createDb(sqlite);
+  const repos = createRepos(db);
   return {
     vars,
+    sqlite,
     db,
     repos,
     resolveCache,

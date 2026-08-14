@@ -1,4 +1,5 @@
-import type { Database } from "bun:sqlite";
+import type { Db } from "./kysely";
+import type { EnvironmentsTable } from "./schema";
 
 export interface Environment {
   id: string;
@@ -9,15 +10,15 @@ export interface Environment {
 }
 
 export interface EnvironmentRepo {
-  create(input: { projectId: string; key: string }): Environment;
-  getById(id: string): Environment | undefined;
-  getByClientKey(clientKey: string): Environment | undefined;
-  listByProject(projectId: string): Environment[];
+  create(input: { projectId: string; key: string }): Promise<Environment>;
+  getById(id: string): Promise<Environment | undefined>;
+  getByClientKey(clientKey: string): Promise<Environment | undefined>;
+  listByProject(projectId: string): Promise<Environment[]>;
   /** Warm-up scan for the resolve cache's auth index (spec 0001 §6.4). */
-  listAll(): Environment[];
+  listAll(): Promise<Environment[]>;
   /** Returns the environment with its new key; the old key is gone with the update. */
-  rotateClientKey(id: string): Environment | undefined;
-  remove(id: string): boolean;
+  rotateClientKey(id: string): Promise<Environment | undefined>;
+  remove(id: string): Promise<boolean>;
 }
 
 const CLIENT_KEY_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -31,15 +32,7 @@ function generateClientKey(): string {
   return key;
 }
 
-interface EnvironmentRow {
-  id: string;
-  project_id: string;
-  key: string;
-  client_key: string;
-  created_at: number;
-}
-
-function toEnvironment(row: EnvironmentRow): Environment {
+function toEnvironment(row: EnvironmentsTable): Environment {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -49,16 +42,18 @@ function toEnvironment(row: EnvironmentRow): Environment {
   };
 }
 
-export function createEnvironmentRepo(db: Database): EnvironmentRepo {
-  const getById = (id: string): Environment | undefined => {
-    const row = db
-      .query<EnvironmentRow, [string]>("SELECT * FROM environments WHERE id = ?")
-      .get(id);
-    return row === null ? undefined : toEnvironment(row);
+export function createEnvironmentRepo(db: Db): EnvironmentRepo {
+  const getById = async (id: string): Promise<Environment | undefined> => {
+    const row = await db
+      .selectFrom("environments")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
+    return row === undefined ? undefined : toEnvironment(row);
   };
 
   return {
-    create({ projectId, key }) {
+    async create({ projectId, key }) {
       const environment: Environment = {
         id: Bun.randomUUIDv7(),
         projectId,
@@ -66,45 +61,51 @@ export function createEnvironmentRepo(db: Database): EnvironmentRepo {
         clientKey: generateClientKey(),
         createdAt: Date.now(),
       };
-      db.query<undefined, [string, string, string, string, number]>(
-        "INSERT INTO environments (id, project_id, key, client_key, created_at) VALUES (?, ?, ?, ?, ?)",
-      ).run(
-        environment.id,
-        environment.projectId,
-        environment.key,
-        environment.clientKey,
-        environment.createdAt,
-      );
+      await db
+        .insertInto("environments")
+        .values({
+          id: environment.id,
+          project_id: environment.projectId,
+          key: environment.key,
+          client_key: environment.clientKey,
+          created_at: environment.createdAt,
+        })
+        .execute();
       return environment;
     },
     getById,
-    getByClientKey(clientKey) {
-      const row = db
-        .query<EnvironmentRow, [string]>("SELECT * FROM environments WHERE client_key = ?")
-        .get(clientKey);
-      return row === null ? undefined : toEnvironment(row);
+    async getByClientKey(clientKey) {
+      const row = await db
+        .selectFrom("environments")
+        .selectAll()
+        .where("client_key", "=", clientKey)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toEnvironment(row);
     },
-    listByProject(projectId) {
-      return db
-        .query<EnvironmentRow, [string]>(
-          "SELECT * FROM environments WHERE project_id = ? ORDER BY key",
-        )
-        .all(projectId)
-        .map(toEnvironment);
+    async listByProject(projectId) {
+      const rows = await db
+        .selectFrom("environments")
+        .selectAll()
+        .where("project_id", "=", projectId)
+        .orderBy("key")
+        .execute();
+      return rows.map(toEnvironment);
     },
-    listAll() {
-      return db.query<EnvironmentRow, []>("SELECT * FROM environments").all().map(toEnvironment);
+    async listAll() {
+      const rows = await db.selectFrom("environments").selectAll().execute();
+      return rows.map(toEnvironment);
     },
-    rotateClientKey(id) {
-      db.query<undefined, [string, string]>(
-        "UPDATE environments SET client_key = ? WHERE id = ?",
-      ).run(generateClientKey(), id);
+    async rotateClientKey(id) {
+      await db
+        .updateTable("environments")
+        .set({ client_key: generateClientKey() })
+        .where("id", "=", id)
+        .execute();
       return getById(id);
     },
-    remove(id) {
-      return (
-        db.query<undefined, [string]>("DELETE FROM environments WHERE id = ?").run(id).changes === 1
-      );
+    async remove(id) {
+      const result = await db.deleteFrom("environments").where("id", "=", id).executeTakeFirst();
+      return result.numDeletedRows === 1n;
     },
   };
 }

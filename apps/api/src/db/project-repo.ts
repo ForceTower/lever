@@ -1,4 +1,5 @@
-import type { Database } from "bun:sqlite";
+import type { Db } from "./kysely";
+import type { ProjectsTable } from "./schema";
 
 export interface Project {
   id: string;
@@ -8,58 +9,53 @@ export interface Project {
 }
 
 export interface ProjectRepo {
-  create(input: { key: string; name: string }): Project;
-  getById(id: string): Project | undefined;
-  getByKey(key: string): Project | undefined;
-  list(): Project[];
-  rename(id: string, name: string): Project | undefined;
-  remove(id: string): boolean;
+  create(input: { key: string; name: string }): Promise<Project>;
+  getById(id: string): Promise<Project | undefined>;
+  getByKey(key: string): Promise<Project | undefined>;
+  list(): Promise<Project[]>;
+  rename(id: string, name: string): Promise<Project | undefined>;
+  remove(id: string): Promise<boolean>;
 }
 
-interface ProjectRow {
-  id: string;
-  key: string;
-  name: string;
-  created_at: number;
-}
-
-function toProject(row: ProjectRow): Project {
+function toProject(row: ProjectsTable): Project {
   return { id: row.id, key: row.key, name: row.name, createdAt: row.created_at };
 }
 
-export function createProjectRepo(db: Database): ProjectRepo {
-  const getById = (id: string): Project | undefined => {
-    const row = db.query<ProjectRow, [string]>("SELECT * FROM projects WHERE id = ?").get(id);
-    return row === null ? undefined : toProject(row);
+export function createProjectRepo(db: Db): ProjectRepo {
+  const getById = async (id: string): Promise<Project | undefined> => {
+    const row = await db.selectFrom("projects").selectAll().where("id", "=", id).executeTakeFirst();
+    return row === undefined ? undefined : toProject(row);
   };
 
   return {
-    create({ key, name }) {
+    async create({ key, name }) {
       const project: Project = { id: Bun.randomUUIDv7(), key, name, createdAt: Date.now() };
-      db.query<undefined, [string, string, string, number]>(
-        "INSERT INTO projects (id, key, name, created_at) VALUES (?, ?, ?, ?)",
-      ).run(project.id, project.key, project.name, project.createdAt);
+      await db
+        .insertInto("projects")
+        .values({ id: project.id, key, name, created_at: project.createdAt })
+        .execute();
       return project;
     },
     getById,
-    getByKey(key) {
-      const row = db.query<ProjectRow, [string]>("SELECT * FROM projects WHERE key = ?").get(key);
-      return row === null ? undefined : toProject(row);
+    async getByKey(key) {
+      const row = await db
+        .selectFrom("projects")
+        .selectAll()
+        .where("key", "=", key)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toProject(row);
     },
-    list() {
-      return db.query<ProjectRow, []>("SELECT * FROM projects ORDER BY key").all().map(toProject);
+    async list() {
+      const rows = await db.selectFrom("projects").selectAll().orderBy("key").execute();
+      return rows.map(toProject);
     },
-    rename(id, name) {
-      db.query<undefined, [string, string]>("UPDATE projects SET name = ? WHERE id = ?").run(
-        name,
-        id,
-      );
+    async rename(id, name) {
+      await db.updateTable("projects").set({ name }).where("id", "=", id).execute();
       return getById(id);
     },
-    remove(id) {
-      return (
-        db.query<undefined, [string]>("DELETE FROM projects WHERE id = ?").run(id).changes === 1
-      );
+    async remove(id) {
+      const result = await db.deleteFrom("projects").where("id", "=", id).executeTakeFirst();
+      return result.numDeletedRows === 1n;
     },
   };
 }

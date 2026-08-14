@@ -114,7 +114,7 @@ describe("publish", () => {
     try {
       const { request, env } = createTestApp(join(dir, "test.db"));
       const { environment } = await seed(request);
-      env.db.exec("PRAGMA busy_timeout = 100");
+      env.sqlite.exec("PRAGMA busy_timeout = 100");
 
       const other = new Database(join(dir, "test.db"));
       other.exec("PRAGMA busy_timeout = 100");
@@ -144,7 +144,7 @@ describe("publish immutability (§10.3)", () => {
     const { request, env } = createTestApp();
     const { environment, parameter, condition } = await seed(request);
     await publish(request, environment.id);
-    const v1Before = env.repos.versions.get(environment.id, 1);
+    const v1Before = await env.repos.versions.get(environment.id, 1);
 
     await request(`/v1/admin/parameters/${parameter.id}`, patch({ defaultValue: true }));
     await request(
@@ -153,9 +153,11 @@ describe("publish immutability (§10.3)", () => {
     );
     await publish(request, environment.id);
 
-    const v1After = env.repos.versions.get(environment.id, 1);
+    const v1After = await env.repos.versions.get(environment.id, 1);
     expect(v1After?.snapshot).toBe(v1Before?.snapshot ?? "");
-    expect(env.repos.versions.get(environment.id, 2)?.snapshot).not.toBe(v1Before?.snapshot);
+    expect((await env.repos.versions.get(environment.id, 2))?.snapshot).not.toBe(
+      v1Before?.snapshot,
+    );
   });
 });
 
@@ -230,8 +232,8 @@ describe("rollback (§8.4)", () => {
     expect(v3.rollbackOf).toBe(1);
 
     // v3's snapshot is byte-identical to v1's — same config, new version.
-    expect(env.repos.versions.get(environment.id, 3)?.snapshot).toBe(
-      env.repos.versions.get(environment.id, 1)?.snapshot ?? "",
+    expect((await env.repos.versions.get(environment.id, 3))?.snapshot).toBe(
+      (await env.repos.versions.get(environment.id, 1))?.snapshot ?? "",
     );
 
     // The draft now matches v1: same parameter row (id and description

@@ -59,6 +59,9 @@ deliberate act that starts with updating the research doc, not the code.
 - Avoid `any` and casting; validate unknown data at boundaries with `zod`, prefer type
   guards over assertions. Let inference work — add explicit types only when inference
   is insufficient.
+- Database access goes through Kysely (custom bun:sqlite dialect in
+  `apps/api/src/db/kysely.ts`); no hand-written SQL strings outside migrations.
+  Inside `withTransaction`, query only through the repos handed to the callback.
 - Never use `.merge()`/`.extend()` on zod schemas (TS2589 risk) — spread `.shape` into
   a flat `z.object()` instead:
 

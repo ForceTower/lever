@@ -14,12 +14,12 @@ export interface EnvironmentDetail extends Environment {
 }
 
 export interface EnvironmentsService {
-  listByProject(projectId: string): Environment[];
-  create(projectId: string, key: string): Environment;
-  get(id: string): EnvironmentDetail;
+  listByProject(projectId: string): Promise<Environment[]>;
+  create(projectId: string, key: string): Promise<Environment>;
+  get(id: string): Promise<EnvironmentDetail>;
   /** The old key is invalid the moment this returns (§8.2). */
-  rotateClientKey(id: string): Environment;
-  remove(id: string, confirm: string): void;
+  rotateClientKey(id: string): Promise<Environment>;
+  remove(id: string, confirm: string): Promise<void>;
 }
 
 export function createEnvironmentsService(
@@ -30,23 +30,27 @@ export function createEnvironmentsService(
   },
   resolveCache: ResolveCache,
 ): EnvironmentsService {
-  const getOrThrow = (id: string): Environment => {
-    const environment = repos.environments.getById(id);
+  const getOrThrow = async (id: string): Promise<Environment> => {
+    const environment = await repos.environments.getById(id);
     if (environment === undefined) throw notFound("environment");
     return environment;
+  };
+
+  const ensureProject = async (projectId: string): Promise<void> => {
+    if ((await repos.projects.getById(projectId)) === undefined) throw notFound("project");
   };
 
   const emptySnapshotBytes = canonicalize(buildSnapshot([]));
 
   return {
-    listByProject(projectId) {
-      if (repos.projects.getById(projectId) === undefined) throw notFound("project");
+    async listByProject(projectId) {
+      await ensureProject(projectId);
       return repos.environments.listByProject(projectId);
     },
-    create(projectId, key) {
-      if (repos.projects.getById(projectId) === undefined) throw notFound("project");
+    async create(projectId, key) {
+      await ensureProject(projectId);
       try {
-        return repos.environments.create({ projectId, key });
+        return await repos.environments.create({ projectId, key });
       } catch (error) {
         if (isConstraintError(error)) {
           throw new LeverError(
@@ -58,10 +62,10 @@ export function createEnvironmentsService(
         throw error;
       }
     },
-    get(id) {
-      const environment = getOrThrow(id);
-      const latest = repos.versions.latest(id);
-      const draftBytes = canonicalize(buildDraftSnapshot(repos, id));
+    async get(id) {
+      const environment = await getOrThrow(id);
+      const latest = await repos.versions.latest(id);
+      const draftBytes = canonicalize(await buildDraftSnapshot(repos, id));
       const publishedBytes = latest?.snapshot ?? emptySnapshotBytes;
       return {
         ...environment,
@@ -69,15 +73,15 @@ export function createEnvironmentsService(
         draftDirty: draftBytes !== publishedBytes,
       };
     },
-    rotateClientKey(id) {
-      const previous = getOrThrow(id);
-      const rotated = repos.environments.rotateClientKey(id);
+    async rotateClientKey(id) {
+      const previous = await getOrThrow(id);
+      const rotated = await repos.environments.rotateClientKey(id);
       if (rotated === undefined) throw notFound("environment");
       resolveCache.clientKeyRotated(previous, rotated);
       return rotated;
     },
-    remove(id, confirm) {
-      const environment = getOrThrow(id);
+    async remove(id, confirm) {
+      const environment = await getOrThrow(id);
       if (confirm !== environment.key) {
         throw new LeverError(
           400,
@@ -85,7 +89,7 @@ export function createEnvironmentsService(
           `body must echo the environment key "${environment.key}" to delete it`,
         );
       }
-      repos.environments.remove(id);
+      await repos.environments.remove(id);
       resolveCache.environmentDeleted(environment);
     },
   };

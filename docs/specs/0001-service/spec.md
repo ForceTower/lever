@@ -51,7 +51,9 @@ apps/api/
       stream.ts         # SSE subscriber registry, broadcast, heartbeat
       admin/            # CRUD services over the repositories
     db/
-      index.ts          # openDb: bun:sqlite handle, pragmas, migration runner
+      index.ts          # openDb (pragmas), migration runner, createRepos, withTransaction
+      kysely.ts         # Kysely dialect over bun:sqlite (§3.5)
+      schema.ts         # Kysely table types mirroring §3.2
       migrations/       # 0001-init.ts, … (§9.3)
       *-repo.ts         # repository seam (§3.4)
   Dockerfile
@@ -95,8 +97,9 @@ schema constraint.
 
 ## 3. Storage
 
-SQLite via `bun:sqlite` (research §3.3). One file, opened with `journal_mode = WAL`,
-`foreign_keys = ON`, `busy_timeout = 5000`, `synchronous = NORMAL`.
+SQLite via `bun:sqlite` (research §3.3), queried through Kysely (§3.5). One file,
+opened with `journal_mode = WAL`, `foreign_keys = ON`, `busy_timeout = 5000`,
+`synchronous = NORMAL`.
 
 ### 3.1 Draft vs published
 
@@ -249,13 +252,22 @@ conditional-value edits surface as `changed` even when the default is untouched.
 
 ### 3.5 Repository seam
 
-All SQL lives in `src/db/*-repo.ts`, one module per aggregate (`project-repo.ts`,
+All queries live in `src/db/*-repo.ts`, one module per aggregate (`project-repo.ts`,
 `environment-repo.ts`, `parameter-repo.ts`, `condition-repo.ts`, `version-repo.ts`),
-each exporting a factory that takes the `bun:sqlite` handle and returns a plain
-interface of typed methods. Services and routes see only these interfaces — the
-promised contained swap to Postgres (research §3.3) reimplements the factories and
-nothing above them. Multi-statement operations (publish, rollback) run inside a
-transaction helper exposed by `db/index.ts`.
+each exporting a factory that takes a Kysely executor and returns a plain interface
+of typed methods. Queries are built with **Kysely** over a small custom dialect
+wrapping `bun:sqlite` (`db/kysely.ts`) — the stock SqliteDialect targets
+better-sqlite3, and owning the dialect buys two properties: every transaction opens
+with `BEGIN IMMEDIATE` (§8.3), and a connection mutex serializes queries on the
+single SQLite connection so one request's transaction can never interleave with
+another's queries. Migrations are the exception and stay raw SQL on the bare handle:
+they run before the query layer exists and their DDL is this spec's §3.2 verbatim.
+
+Services and routes see only the repository interfaces — the promised contained swap
+to Postgres (research §3.3) swaps the dialect and schema types and nothing above
+them. Multi-statement operations (publish, rollback, conditional-value replacement)
+run through `withTransaction` in `db/index.ts`, which hands the callback repositories
+bound to the transaction; inside a transaction, all queries must go through those.
 
 ## 4. Condition semantics
 

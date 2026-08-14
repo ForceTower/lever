@@ -14,22 +14,24 @@ const patchBodySchema = z.strictObject({
 export function createConditionRoutes(conditions: ConditionsService): Hono<AppEnv> {
   const app = createHono();
 
-  app.get("/environments/:envId/conditions", (c) =>
-    c.json(conditions.listByEnvironment(c.req.param("envId"))),
+  app.get("/environments/:envId/conditions", async (c) =>
+    c.json(await conditions.listByEnvironment(c.req.param("envId"))),
   );
 
-  app.post("/environments/:envId/conditions", zValidator("json", createBodySchema), (c) =>
-    c.json(conditions.create(c.req.param("envId"), c.req.valid("json")), 201),
+  app.post("/environments/:envId/conditions", zValidator("json", createBodySchema), async (c) =>
+    c.json(await conditions.create(c.req.param("envId"), c.req.valid("json")), 201),
   );
 
-  app.get("/conditions/:conditionId", (c) => c.json(conditions.get(c.req.param("conditionId"))));
-
-  app.patch("/conditions/:conditionId", zValidator("json", patchBodySchema), (c) =>
-    c.json(conditions.update(c.req.param("conditionId"), c.req.valid("json"))),
+  app.get("/conditions/:conditionId", async (c) =>
+    c.json(await conditions.get(c.req.param("conditionId"))),
   );
 
-  app.delete("/conditions/:conditionId", (c) => {
-    conditions.remove(c.req.param("conditionId"));
+  app.patch("/conditions/:conditionId", zValidator("json", patchBodySchema), async (c) =>
+    c.json(await conditions.update(c.req.param("conditionId"), c.req.valid("json"))),
+  );
+
+  app.delete("/conditions/:conditionId", async (c) => {
+    await conditions.remove(c.req.param("conditionId"));
     return c.body(null, 204);
   });
 

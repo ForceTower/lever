@@ -1,5 +1,6 @@
-import type { Database } from "bun:sqlite";
 import { clausesSchema, type Clause } from "../service/snapshot";
+import type { Db } from "./kysely";
+import type { ConditionsTable } from "./schema";
 
 export interface Condition {
   id: string;
@@ -10,30 +11,22 @@ export interface Condition {
 }
 
 export interface ConditionRepo {
-  create(input: { environmentId: string; name: string; clauses: Clause[] }): Condition;
-  getById(id: string): Condition | undefined;
-  listByEnvironment(environmentId: string): Condition[];
-  update(id: string, patch: { name?: string; clauses?: Clause[] }): Condition | undefined;
+  create(input: { environmentId: string; name: string; clauses: Clause[] }): Promise<Condition>;
+  getById(id: string): Promise<Condition | undefined>;
+  listByEnvironment(environmentId: string): Promise<Condition[]>;
+  update(id: string, patch: { name?: string; clauses?: Clause[] }): Promise<Condition | undefined>;
   /**
    * Throws SQLITE_CONSTRAINT while any conditional value references the
    * condition (§3.2 RESTRICT) — deletion order is explicit, never a cascade
    * that changes resolved values. The service layer maps this to a 409.
    */
-  remove(id: string): boolean;
-}
-
-interface ConditionRow {
-  id: string;
-  environment_id: string;
-  name: string;
-  clauses: string;
-  updated_at: number;
+  remove(id: string): Promise<boolean>;
 }
 
 // Clauses were zod-validated on write; parsing again on read means a row that
 // drifted (manual edit, future format change) fails loudly instead of reaching
 // the evaluator.
-function toCondition(row: ConditionRow): Condition {
+function toCondition(row: ConditionsTable): Condition {
   return {
     id: row.id,
     environmentId: row.environment_id,
@@ -43,14 +36,18 @@ function toCondition(row: ConditionRow): Condition {
   };
 }
 
-export function createConditionRepo(db: Database): ConditionRepo {
-  const getById = (id: string): Condition | undefined => {
-    const row = db.query<ConditionRow, [string]>("SELECT * FROM conditions WHERE id = ?").get(id);
-    return row === null ? undefined : toCondition(row);
+export function createConditionRepo(db: Db): ConditionRepo {
+  const getById = async (id: string): Promise<Condition | undefined> => {
+    const row = await db
+      .selectFrom("conditions")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
+    return row === undefined ? undefined : toCondition(row);
   };
 
   return {
-    create({ environmentId, name, clauses }) {
+    async create({ environmentId, name, clauses }) {
       const condition: Condition = {
         id: Bun.randomUUIDv7(),
         environmentId,
@@ -58,43 +55,45 @@ export function createConditionRepo(db: Database): ConditionRepo {
         clauses,
         updatedAt: Date.now(),
       };
-      db.query<undefined, [string, string, string, string, number]>(
-        "INSERT INTO conditions (id, environment_id, name, clauses, updated_at) VALUES (?, ?, ?, ?, ?)",
-      ).run(
-        condition.id,
-        condition.environmentId,
-        condition.name,
-        JSON.stringify(condition.clauses),
-        condition.updatedAt,
-      );
+      await db
+        .insertInto("conditions")
+        .values({
+          id: condition.id,
+          environment_id: condition.environmentId,
+          name: condition.name,
+          clauses: JSON.stringify(condition.clauses),
+          updated_at: condition.updatedAt,
+        })
+        .execute();
       return condition;
     },
     getById,
-    listByEnvironment(environmentId) {
-      return db
-        .query<ConditionRow, [string]>(
-          "SELECT * FROM conditions WHERE environment_id = ? ORDER BY name",
-        )
-        .all(environmentId)
-        .map(toCondition);
+    async listByEnvironment(environmentId) {
+      const rows = await db
+        .selectFrom("conditions")
+        .selectAll()
+        .where("environment_id", "=", environmentId)
+        .orderBy("name")
+        .execute();
+      return rows.map(toCondition);
     },
-    update(id, patch) {
-      const existing = getById(id);
+    async update(id, patch) {
+      const existing = await getById(id);
       if (existing === undefined) return undefined;
-      db.query<undefined, [string, string, number, string]>(
-        "UPDATE conditions SET name = ?, clauses = ?, updated_at = ? WHERE id = ?",
-      ).run(
-        patch.name ?? existing.name,
-        JSON.stringify(patch.clauses ?? existing.clauses),
-        Date.now(),
-        id,
-      );
+      await db
+        .updateTable("conditions")
+        .set({
+          name: patch.name ?? existing.name,
+          clauses: JSON.stringify(patch.clauses ?? existing.clauses),
+          updated_at: Date.now(),
+        })
+        .where("id", "=", id)
+        .execute();
       return getById(id);
     },
-    remove(id) {
-      return (
-        db.query<undefined, [string]>("DELETE FROM conditions WHERE id = ?").run(id).changes === 1
-      );
+    async remove(id) {
+      const result = await db.deleteFrom("conditions").where("id", "=", id).executeTakeFirst();
+      return result.numDeletedRows === 1n;
     },
   };
 }

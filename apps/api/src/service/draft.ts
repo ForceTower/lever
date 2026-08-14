@@ -10,20 +10,26 @@ export interface DraftRepos {
 /**
  * Joins the draft rows into the shape `buildSnapshot` serializes: parameters
  * with their conditional values in `position` order, conditions inlined by
- * value (§3.3). Shared by the environment dirty flag now and by publish and
- * the diff preview in Phase 4.
+ * value (§3.3). Shared by the environment dirty flag, publish, and the diff
+ * preview.
  */
-export function buildDraftSnapshot(repos: DraftRepos, environmentId: string): Snapshot {
+export async function buildDraftSnapshot(
+  repos: DraftRepos,
+  environmentId: string,
+): Promise<Snapshot> {
   const conditionsById = new Map(
-    repos.conditions.listByEnvironment(environmentId).map((condition) => [condition.id, condition]),
+    (await repos.conditions.listByEnvironment(environmentId)).map(
+      (condition) => [condition.id, condition] as const,
+    ),
   );
-  const parameters: DraftParameter[] = repos.parameters
-    .listByEnvironment(environmentId)
-    .map((parameter) => ({
+  const parameters: DraftParameter[] = [];
+  for (const parameter of await repos.parameters.listByEnvironment(environmentId)) {
+    const conditionalValues = await repos.parameters.listConditionalValues(parameter.id);
+    parameters.push({
       key: parameter.key,
       type: parameter.type,
       defaultValue: parameter.defaultValue,
-      conditionalValues: repos.parameters.listConditionalValues(parameter.id).map((cv) => {
+      conditionalValues: conditionalValues.map((cv) => {
         const condition = conditionsById.get(cv.conditionId);
         if (condition === undefined) {
           // The FK guarantees this; a miss means the join itself is broken.
@@ -34,6 +40,7 @@ export function buildDraftSnapshot(repos: DraftRepos, environmentId: string): Sn
           value: cv.value,
         };
       }),
-    }));
+    });
+  }
   return buildSnapshot(parameters);
 }

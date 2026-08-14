@@ -1,8 +1,5 @@
-import type { Database } from "bun:sqlite";
-import type { ConditionRepo } from "../../db/condition-repo";
-import type { EnvironmentRepo } from "../../db/environment-repo";
+import { withTransaction, type Db, type Repos } from "../../db";
 import type { ConditionalValue, Parameter, ParameterRepo } from "../../db/parameter-repo";
-import { withTransaction } from "../../db";
 import { isConstraintError, LeverError, notFound } from "../../error";
 import type { JsonValue } from "../canonicalize";
 import { type ParameterType, valueMatchesType } from "../snapshot";
@@ -12,7 +9,7 @@ export interface ParameterDetail extends Parameter {
 }
 
 export interface ParametersService {
-  listByEnvironment(environmentId: string): ParameterDetail[];
+  listByEnvironment(environmentId: string): Promise<ParameterDetail[]>;
   create(
     environmentId: string,
     input: {
@@ -21,8 +18,8 @@ export interface ParametersService {
       defaultValue: JsonValue;
       description?: string | undefined;
     },
-  ): ParameterDetail;
-  get(id: string): ParameterDetail;
+  ): Promise<ParameterDetail>;
+  get(id: string): Promise<ParameterDetail>;
   /**
    * A type change revalidates the default and every conditional value against
    * the new type in one transaction, or rejects (§8.2).
@@ -35,8 +32,8 @@ export interface ParametersService {
       defaultValue?: JsonValue | undefined;
       description?: string | null | undefined;
     },
-  ): ParameterDetail;
-  remove(id: string): void;
+  ): Promise<ParameterDetail>;
+  remove(id: string): Promise<void>;
   /**
    * Replaces the full ordered list (§8.2): positions are assigned from list
    * order, every condition must belong to the parameter's environment — the
@@ -46,44 +43,45 @@ export interface ParametersService {
   replaceConditionalValues(
     parameterId: string,
     values: { conditionId: string; value: JsonValue }[],
-  ): ConditionalValue[];
+  ): Promise<ConditionalValue[]>;
 }
 
 function typeMismatch(where: string, type: ParameterType): LeverError {
   return new LeverError(400, "type_mismatch", `${where} must be a ${type}`);
 }
 
-export function createParametersService(
-  db: Database,
-  repos: {
-    parameters: ParameterRepo;
-    conditions: ConditionRepo;
-    environments: EnvironmentRepo;
-  },
-): ParametersService {
-  const getOrThrow = (id: string): Parameter => {
-    const parameter = repos.parameters.getById(id);
+export function createParametersService(db: Db, repos: Repos): ParametersService {
+  const getOrThrow = async (id: string, from: ParameterRepo = repos.parameters) => {
+    const parameter = await from.getById(id);
     if (parameter === undefined) throw notFound("parameter");
     return parameter;
   };
 
-  const withValues = (parameter: Parameter): ParameterDetail => ({
+  const withValues = async (
+    parameter: Parameter,
+    from: ParameterRepo = repos.parameters,
+  ): Promise<ParameterDetail> => ({
     ...parameter,
-    conditionalValues: repos.parameters.listConditionalValues(parameter.id),
+    conditionalValues: await from.listConditionalValues(parameter.id),
   });
 
   return {
-    listByEnvironment(environmentId) {
-      if (repos.environments.getById(environmentId) === undefined) throw notFound("environment");
-      return repos.parameters.listByEnvironment(environmentId).map(withValues);
+    async listByEnvironment(environmentId) {
+      if ((await repos.environments.getById(environmentId)) === undefined) {
+        throw notFound("environment");
+      }
+      const parameters = await repos.parameters.listByEnvironment(environmentId);
+      return Promise.all(parameters.map((parameter) => withValues(parameter)));
     },
-    create(environmentId, input) {
-      if (repos.environments.getById(environmentId) === undefined) throw notFound("environment");
+    async create(environmentId, input) {
+      if ((await repos.environments.getById(environmentId)) === undefined) {
+        throw notFound("environment");
+      }
       if (!valueMatchesType(input.type, input.defaultValue)) {
         throw typeMismatch("defaultValue", input.type);
       }
       try {
-        return withValues(repos.parameters.create({ environmentId, ...input }));
+        return await withValues(await repos.parameters.create({ environmentId, ...input }));
       } catch (error) {
         if (isConstraintError(error)) {
           throw new LeverError(
@@ -95,9 +93,9 @@ export function createParametersService(
         throw error;
       }
     },
-    get: (id) => withValues(getOrThrow(id)),
-    update(id, patch) {
-      getOrThrow(id);
+    get: async (id) => withValues(await getOrThrow(id)),
+    async update(id, patch) {
+      await getOrThrow(id);
       const cleaned: {
         key?: string;
         type?: ParameterType;
@@ -110,10 +108,10 @@ export function createParametersService(
       if (patch.description !== undefined) cleaned.description = patch.description;
       try {
         // The throw on a type mismatch rolls the whole update back.
-        return withTransaction(db, () => {
-          const updated = repos.parameters.update(id, cleaned);
+        return await withTransaction(db, async (txRepos) => {
+          const updated = await txRepos.parameters.update(id, cleaned);
           if (updated === undefined) throw notFound("parameter");
-          const detail = withValues(updated);
+          const detail = await withValues(updated, txRepos.parameters);
           if (!valueMatchesType(detail.type, detail.defaultValue)) {
             throw typeMismatch("defaultValue", detail.type);
           }
@@ -131,12 +129,12 @@ export function createParametersService(
         throw error;
       }
     },
-    remove(id) {
-      getOrThrow(id);
-      repos.parameters.remove(id);
+    async remove(id) {
+      await getOrThrow(id);
+      await repos.parameters.remove(id);
     },
-    replaceConditionalValues(parameterId, values) {
-      const parameter = getOrThrow(parameterId);
+    async replaceConditionalValues(parameterId, values) {
+      const parameter = await getOrThrow(parameterId);
       const seen = new Set<string>();
       for (const { conditionId, value } of values) {
         if (seen.has(conditionId)) {
@@ -147,7 +145,7 @@ export function createParametersService(
           );
         }
         seen.add(conditionId);
-        const condition = repos.conditions.getById(conditionId);
+        const condition = await repos.conditions.getById(conditionId);
         if (condition === undefined || condition.environmentId !== parameter.environmentId) {
           throw new LeverError(
             400,
@@ -159,7 +157,10 @@ export function createParametersService(
           throw typeMismatch(`value for condition ${conditionId}`, parameter.type);
         }
       }
-      return repos.parameters.replaceConditionalValues(parameterId, values);
+      // The repo method is delete-then-insert; the transaction makes it atomic.
+      return withTransaction(db, (txRepos) =>
+        txRepos.parameters.replaceConditionalValues(parameterId, values),
+      );
     },
   };
 }

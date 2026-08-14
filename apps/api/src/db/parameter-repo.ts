@@ -1,6 +1,7 @@
-import type { Database } from "bun:sqlite";
 import { type JsonValue } from "../service/canonicalize";
 import { jsonValueSchema, type ParameterType, parameterTypeSchema } from "../service/snapshot";
+import type { Db } from "./kysely";
+import type { ParameterConditionalValuesTable, ParametersTable } from "./schema";
 
 export interface Parameter {
   id: string;
@@ -27,9 +28,9 @@ export interface ParameterRepo {
     type: ParameterType;
     defaultValue: JsonValue;
     description?: string | undefined;
-  }): Parameter;
-  getById(id: string): Parameter | undefined;
-  listByEnvironment(environmentId: string): Parameter[];
+  }): Promise<Parameter>;
+  getById(id: string): Promise<Parameter | undefined>;
+  listByEnvironment(environmentId: string): Promise<Parameter[]>;
   update(
     id: string,
     patch: {
@@ -38,44 +39,27 @@ export interface ParameterRepo {
       defaultValue?: JsonValue;
       description?: string | null;
     },
-  ): Parameter | undefined;
-  remove(id: string): boolean;
+  ): Promise<Parameter | undefined>;
+  remove(id: string): Promise<boolean>;
   /**
    * Replaces the full ordered list — ordering is first-match-wins semantics
    * (§4), so partial reorders are not offered. Positions are assigned 0…n−1
-   * from list order. Same-environment validation of every conditionId is the
-   * caller's job (§3.2 — service-layer invariant).
+   * from list order. Not atomic on its own: the caller wraps it in a
+   * transaction, and also owns same-environment validation of every
+   * conditionId (§3.2 — service-layer invariant).
    */
   replaceConditionalValues(
     parameterId: string,
     values: { conditionId: string; value: JsonValue }[],
-  ): ConditionalValue[];
-  listConditionalValues(parameterId: string): ConditionalValue[];
-}
-
-interface ParameterRow {
-  id: string;
-  environment_id: string;
-  key: string;
-  type: string;
-  default_value: string;
-  description: string | null;
-  updated_at: number;
-}
-
-interface ConditionalValueRow {
-  id: string;
-  parameter_id: string;
-  condition_id: string;
-  value: string;
-  position: number;
+  ): Promise<ConditionalValue[]>;
+  listConditionalValues(parameterId: string): Promise<ConditionalValue[]>;
 }
 
 function parseJson(encoded: string): JsonValue {
   return jsonValueSchema.parse(JSON.parse(encoded));
 }
 
-function toParameter(row: ParameterRow): Parameter {
+function toParameter(row: ParametersTable): Parameter {
   return {
     id: row.id,
     environmentId: row.environment_id,
@@ -87,7 +71,7 @@ function toParameter(row: ParameterRow): Parameter {
   };
 }
 
-function toConditionalValue(row: ConditionalValueRow): ConditionalValue {
+function toConditionalValue(row: ParameterConditionalValuesTable): ConditionalValue {
   return {
     id: row.id,
     parameterId: row.parameter_id,
@@ -97,22 +81,28 @@ function toConditionalValue(row: ConditionalValueRow): ConditionalValue {
   };
 }
 
-export function createParameterRepo(db: Database): ParameterRepo {
-  const getById = (id: string): Parameter | undefined => {
-    const row = db.query<ParameterRow, [string]>("SELECT * FROM parameters WHERE id = ?").get(id);
-    return row === null ? undefined : toParameter(row);
+export function createParameterRepo(db: Db): ParameterRepo {
+  const getById = async (id: string): Promise<Parameter | undefined> => {
+    const row = await db
+      .selectFrom("parameters")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
+    return row === undefined ? undefined : toParameter(row);
   };
 
-  const listConditionalValues = (parameterId: string): ConditionalValue[] =>
-    db
-      .query<ConditionalValueRow, [string]>(
-        "SELECT * FROM parameter_conditional_values WHERE parameter_id = ? ORDER BY position",
-      )
-      .all(parameterId)
-      .map(toConditionalValue);
+  const listConditionalValues = async (parameterId: string): Promise<ConditionalValue[]> => {
+    const rows = await db
+      .selectFrom("parameter_conditional_values")
+      .selectAll()
+      .where("parameter_id", "=", parameterId)
+      .orderBy("position")
+      .execute();
+    return rows.map(toConditionalValue);
+  };
 
   return {
-    create({ environmentId, key, type, defaultValue, description }) {
+    async create({ environmentId, key, type, defaultValue, description }) {
       const parameter: Parameter = {
         id: Bun.randomUUIDv7(),
         environmentId,
@@ -122,66 +112,73 @@ export function createParameterRepo(db: Database): ParameterRepo {
         description: description ?? null,
         updatedAt: Date.now(),
       };
-      db.query<undefined, [string, string, string, string, string, string | null, number]>(
-        `INSERT INTO parameters (id, environment_id, key, type, default_value, description, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        parameter.id,
-        parameter.environmentId,
-        parameter.key,
-        parameter.type,
-        JSON.stringify(parameter.defaultValue),
-        parameter.description,
-        parameter.updatedAt,
-      );
+      await db
+        .insertInto("parameters")
+        .values({
+          id: parameter.id,
+          environment_id: parameter.environmentId,
+          key: parameter.key,
+          type: parameter.type,
+          default_value: JSON.stringify(parameter.defaultValue),
+          description: parameter.description,
+          updated_at: parameter.updatedAt,
+        })
+        .execute();
       return parameter;
     },
     getById,
-    listByEnvironment(environmentId) {
-      return db
-        .query<ParameterRow, [string]>(
-          "SELECT * FROM parameters WHERE environment_id = ? ORDER BY key",
-        )
-        .all(environmentId)
-        .map(toParameter);
+    async listByEnvironment(environmentId) {
+      const rows = await db
+        .selectFrom("parameters")
+        .selectAll()
+        .where("environment_id", "=", environmentId)
+        .orderBy("key")
+        .execute();
+      return rows.map(toParameter);
     },
-    update(id, patch) {
-      const existing = getById(id);
+    async update(id, patch) {
+      const existing = await getById(id);
       if (existing === undefined) return undefined;
-      db.query<undefined, [string, string, string, string | null, number, string]>(
-        "UPDATE parameters SET key = ?, type = ?, default_value = ?, description = ?, updated_at = ? WHERE id = ?",
-      ).run(
-        patch.key ?? existing.key,
-        patch.type ?? existing.type,
-        // Explicit undefined check: null is a legitimate defaultValue for json
-        // parameters, so ?? would silently drop it.
-        JSON.stringify(
-          patch.defaultValue === undefined ? existing.defaultValue : patch.defaultValue,
-        ),
-        patch.description === undefined ? existing.description : patch.description,
-        Date.now(),
-        id,
-      );
+      await db
+        .updateTable("parameters")
+        .set({
+          key: patch.key ?? existing.key,
+          type: patch.type ?? existing.type,
+          // Explicit undefined check: null is a legitimate defaultValue for
+          // json parameters, so ?? would silently drop it.
+          default_value: JSON.stringify(
+            patch.defaultValue === undefined ? existing.defaultValue : patch.defaultValue,
+          ),
+          description: patch.description === undefined ? existing.description : patch.description,
+          updated_at: Date.now(),
+        })
+        .where("id", "=", id)
+        .execute();
       return getById(id);
     },
-    remove(id) {
-      return (
-        db.query<undefined, [string]>("DELETE FROM parameters WHERE id = ?").run(id).changes === 1
-      );
+    async remove(id) {
+      const result = await db.deleteFrom("parameters").where("id", "=", id).executeTakeFirst();
+      return result.numDeletedRows === 1n;
     },
-    replaceConditionalValues(parameterId, values) {
-      const insert = db.query<undefined, [string, string, string, string, number]>(
-        `INSERT INTO parameter_conditional_values (id, parameter_id, condition_id, value, position)
-         VALUES (?, ?, ?, ?, ?)`,
-      );
-      db.transaction(() => {
-        db.query<undefined, [string]>(
-          "DELETE FROM parameter_conditional_values WHERE parameter_id = ?",
-        ).run(parameterId);
-        values.forEach(({ conditionId, value }, position) => {
-          insert.run(Bun.randomUUIDv7(), parameterId, conditionId, JSON.stringify(value), position);
-        });
-      })();
+    async replaceConditionalValues(parameterId, values) {
+      await db
+        .deleteFrom("parameter_conditional_values")
+        .where("parameter_id", "=", parameterId)
+        .execute();
+      if (values.length > 0) {
+        await db
+          .insertInto("parameter_conditional_values")
+          .values(
+            values.map(({ conditionId, value }, position) => ({
+              id: Bun.randomUUIDv7(),
+              parameter_id: parameterId,
+              condition_id: conditionId,
+              value: JSON.stringify(value),
+              position,
+            })),
+          )
+          .execute();
+      }
       return listConditionalValues(parameterId);
     },
     listConditionalValues,

@@ -4,29 +4,29 @@ import { isConstraintError, LeverError, notFound } from "../../error";
 import type { ResolveCache } from "../resolve-cache";
 
 export interface ProjectsService {
-  list(): Project[];
-  create(input: { key: string; name: string }): Project;
-  get(id: string): Project;
-  rename(id: string, name: string): Project;
+  list(): Promise<Project[]>;
+  create(input: { key: string; name: string }): Promise<Project>;
+  get(id: string): Promise<Project>;
+  rename(id: string, name: string): Promise<Project>;
   /** Cascades away every environment and its version chain — hence the confirm echo (§8.2). */
-  remove(id: string, confirm: string): void;
+  remove(id: string, confirm: string): Promise<void>;
 }
 
 export function createProjectsService(
   repos: { projects: ProjectRepo; environments: EnvironmentRepo },
   resolveCache: ResolveCache,
 ): ProjectsService {
-  const get = (id: string): Project => {
-    const project = repos.projects.getById(id);
+  const get = async (id: string): Promise<Project> => {
+    const project = await repos.projects.getById(id);
     if (project === undefined) throw notFound("project");
     return project;
   };
 
   return {
     list: () => repos.projects.list(),
-    create(input) {
+    async create(input) {
       try {
-        return repos.projects.create(input);
+        return await repos.projects.create(input);
       } catch (error) {
         if (isConstraintError(error)) {
           throw new LeverError(409, "already_exists", `project key "${input.key}" already exists`);
@@ -35,14 +35,14 @@ export function createProjectsService(
       }
     },
     get,
-    rename(id, name) {
-      get(id);
-      const renamed = repos.projects.rename(id, name);
+    async rename(id, name) {
+      await get(id);
+      const renamed = await repos.projects.rename(id, name);
       if (renamed === undefined) throw notFound("project");
       return renamed;
     },
-    remove(id, confirm) {
-      const project = get(id);
+    async remove(id, confirm) {
+      const project = await get(id);
       if (confirm !== project.key) {
         throw new LeverError(
           400,
@@ -50,8 +50,8 @@ export function createProjectsService(
           `body must echo the project key "${project.key}" to delete it`,
         );
       }
-      const environments = repos.environments.listByProject(id);
-      repos.projects.remove(id);
+      const environments = await repos.environments.listByProject(id);
+      await repos.projects.remove(id);
       for (const environment of environments) resolveCache.environmentDeleted(environment);
     },
   };

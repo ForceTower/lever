@@ -14,11 +14,13 @@ const versionParamSchema = z.object({ n: z.coerce.number().int().positive() });
 export function createVersionRoutes(publish: PublishService): Hono<AppEnv> {
   const app = createHono();
 
-  app.get("/environments/:envId/diff", (c) => c.json(publish.preview(c.req.param("envId"))));
+  app.get("/environments/:envId/diff", async (c) =>
+    c.json(await publish.preview(c.req.param("envId"))),
+  );
 
-  app.post("/environments/:envId/publish", zValidator("json", publishBodySchema), (c) =>
+  app.post("/environments/:envId/publish", zValidator("json", publishBodySchema), async (c) =>
     c.json(
-      publish.publish(c.req.param("envId"), {
+      await publish.publish(c.req.param("envId"), {
         author: c.get("adminName"),
         expectedVersion: c.req.valid("json").expectedVersion,
       }),
@@ -26,20 +28,20 @@ export function createVersionRoutes(publish: PublishService): Hono<AppEnv> {
     ),
   );
 
-  app.get("/environments/:envId/versions", (c) =>
-    c.json(publish.listVersions(c.req.param("envId"))),
+  app.get("/environments/:envId/versions", async (c) =>
+    c.json(await publish.listVersions(c.req.param("envId"))),
   );
 
-  app.get("/environments/:envId/versions/:n", zValidator("param", versionParamSchema), (c) =>
-    c.json(publish.getVersion(c.req.param("envId"), c.req.valid("param").n)),
+  app.get("/environments/:envId/versions/:n", zValidator("param", versionParamSchema), async (c) =>
+    c.json(await publish.getVersion(c.req.param("envId"), c.req.valid("param").n)),
   );
 
   app.post(
     "/environments/:envId/versions/:n/rollback",
     zValidator("param", versionParamSchema),
-    (c) =>
+    async (c) =>
       c.json(
-        publish.rollback(c.req.param("envId"), c.req.valid("param").n, c.get("adminName")),
+        await publish.rollback(c.req.param("envId"), c.req.valid("param").n, c.get("adminName")),
         201,
       ),
   );

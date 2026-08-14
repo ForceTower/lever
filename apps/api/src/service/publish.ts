@@ -1,13 +1,9 @@
-import type { Database } from "bun:sqlite";
-import type { ConditionRepo } from "../db/condition-repo";
-import type { EnvironmentRepo } from "../db/environment-repo";
-import type { ParameterRepo } from "../db/parameter-repo";
-import type { Version, VersionRepo } from "../db/version-repo";
-import { withImmediateTransaction } from "../db";
+import { withTransaction, type Db, type Repos } from "../db";
+import type { Version } from "../db/version-repo";
 import { isBusyError, isConstraintError, LeverError, notFound } from "../error";
+import { getLogger } from "../logger";
 import { canonicalize } from "./canonicalize";
 import { buildDraftSnapshot } from "./draft";
-import { getLogger } from "../logger";
 import type { ResolveCache } from "./resolve-cache";
 import {
   buildSnapshot,
@@ -51,31 +47,26 @@ export interface VersionDetail {
 
 export interface PublishService {
   /** The publish preview (§8.3): the would-be diff against the latest version. */
-  preview(environmentId: string): PublishPreview;
+  preview(environmentId: string): Promise<PublishPreview>;
   publish(
     environmentId: string,
     input: { author: string; expectedVersion?: number | undefined },
-  ): PublishedVersion;
+  ): Promise<PublishedVersion>;
   /** Republishes version `n` as `N+1` after rewriting the draft to match it (§8.4). */
-  rollback(environmentId: string, version: number, author: string): PublishedVersion;
-  listVersions(environmentId: string): VersionSummary[];
-  getVersion(environmentId: string, version: number): VersionDetail;
-}
-
-interface PublishRepos {
-  environments: EnvironmentRepo;
-  parameters: ParameterRepo;
-  conditions: ConditionRepo;
-  versions: VersionRepo;
+  rollback(environmentId: string, version: number, author: string): Promise<PublishedVersion>;
+  listVersions(environmentId: string): Promise<VersionSummary[]>;
+  getVersion(environmentId: string, version: number): Promise<VersionDetail>;
 }
 
 export function createPublishService(
-  db: Database,
-  repos: PublishRepos,
+  db: Db,
+  repos: Repos,
   resolveCache: ResolveCache,
 ): PublishService {
-  const ensureEnvironment = (environmentId: string): void => {
-    if (repos.environments.getById(environmentId) === undefined) throw notFound("environment");
+  const ensureEnvironment = async (environmentId: string): Promise<void> => {
+    if ((await repos.environments.getById(environmentId)) === undefined) {
+      throw notFound("environment");
+    }
   };
 
   const emptySnapshotBytes = canonicalize(buildSnapshot([]));
@@ -89,13 +80,17 @@ export function createPublishService(
    * parameters absent from the snapshot are deleted; conditions the snapshot
    * never references are left untouched. Conditional values are replaced
    * wholesale — no condition rows are deleted, keeping clear of the RESTRICT
-   * FK. Runs inside the rollback transaction.
+   * FK. Runs inside the rollback transaction with its repos.
    */
-  const rewriteDraft = (environmentId: string, snapshot: Snapshot): void => {
-    const conditionIdByName = new Map(
-      repos.conditions
-        .listByEnvironment(environmentId)
-        .map((condition) => [condition.name, condition] as const),
+  const rewriteDraft = async (
+    txRepos: Repos,
+    environmentId: string,
+    snapshot: Snapshot,
+  ): Promise<void> => {
+    const conditionByName = new Map(
+      (await txRepos.conditions.listByEnvironment(environmentId)).map(
+        (condition) => [condition.name, condition] as const,
+      ),
     );
     const wantedClauses = new Map<string, Clause[]>();
     for (const parameter of Object.values(snapshot.parameters)) {
@@ -107,36 +102,42 @@ export function createPublishService(
     }
     const conditionIds = new Map<string, string>();
     for (const [name, clauses] of wantedClauses) {
-      const existing = conditionIdByName.get(name);
+      const existing = conditionByName.get(name);
       if (existing === undefined) {
-        conditionIds.set(name, repos.conditions.create({ environmentId, name, clauses }).id);
+        conditionIds.set(
+          name,
+          (await txRepos.conditions.create({ environmentId, name, clauses })).id,
+        );
       } else {
         if (canonicalize(existing.clauses) !== canonicalize(clauses)) {
-          repos.conditions.update(existing.id, { clauses });
+          await txRepos.conditions.update(existing.id, { clauses });
         }
         conditionIds.set(name, existing.id);
       }
     }
 
-    const existingParameters = repos.parameters.listByEnvironment(environmentId);
+    const existingParameters = await txRepos.parameters.listByEnvironment(environmentId);
     const parameterByKey = new Map(existingParameters.map((p) => [p.key, p] as const));
     for (const [key, snapshotParameter] of Object.entries(snapshot.parameters)) {
       const existing = parameterByKey.get(key);
-      const parameterId =
-        existing?.id ??
-        repos.parameters.create({
-          environmentId,
-          key,
-          type: snapshotParameter.type,
-          defaultValue: snapshotParameter.defaultValue,
-        }).id;
-      if (existing !== undefined) {
-        repos.parameters.update(existing.id, {
+      let parameterId: string;
+      if (existing === undefined) {
+        parameterId = (
+          await txRepos.parameters.create({
+            environmentId,
+            key,
+            type: snapshotParameter.type,
+            defaultValue: snapshotParameter.defaultValue,
+          })
+        ).id;
+      } else {
+        parameterId = existing.id;
+        await txRepos.parameters.update(existing.id, {
           type: snapshotParameter.type,
           defaultValue: snapshotParameter.defaultValue,
         });
       }
-      repos.parameters.replaceConditionalValues(
+      await txRepos.parameters.replaceConditionalValues(
         parameterId,
         snapshotParameter.conditionalValues.map((cv) => {
           const conditionId = conditionIds.get(cv.condition.name);
@@ -149,7 +150,7 @@ export function createPublishService(
     }
     for (const parameter of existingParameters) {
       if (snapshot.parameters[parameter.key] === undefined) {
-        repos.parameters.remove(parameter.id);
+        await txRepos.parameters.remove(parameter.id);
       }
     }
   };
@@ -171,11 +172,20 @@ export function createPublishService(
     diff,
   });
 
+  const asPublishConflict = (error: unknown): never => {
+    if (isBusyError(error) || isConstraintError(error)) {
+      throw new LeverError(409, "publish_conflict", "another publish is in progress", {
+        cause: error,
+      });
+    }
+    throw error;
+  };
+
   return {
-    preview(environmentId) {
-      ensureEnvironment(environmentId);
-      const latest = repos.versions.latest(environmentId);
-      const snapshot = buildDraftSnapshot(repos, environmentId);
+    async preview(environmentId) {
+      await ensureEnvironment(environmentId);
+      const latest = await repos.versions.latest(environmentId);
+      const snapshot = await buildDraftSnapshot(repos, environmentId);
       const draftBytes = canonicalize(snapshot);
       return {
         draftDirty: draftBytes !== (latest?.snapshot ?? emptySnapshotBytes),
@@ -183,88 +193,70 @@ export function createPublishService(
       };
     },
 
-    publish(environmentId, { author, expectedVersion }) {
-      ensureEnvironment(environmentId);
-      try {
-        const { inserted, previous, snapshot } = withImmediateTransaction(db, () => {
-          const latest = repos.versions.latest(environmentId);
-          const latestNumber = latest?.version ?? 0;
-          if (expectedVersion !== undefined && expectedVersion !== latestNumber) {
-            throw new LeverError(
-              409,
-              "publish_conflict",
-              `expected version ${expectedVersion} but latest is ${latestNumber}`,
-            );
-          }
-          // Validated at publish time so evaluation may assume well-formed
-          // snapshots (§4).
-          const built = snapshotSchema.parse(buildDraftSnapshot(repos, environmentId));
-          const bytes = canonicalize(built);
-          if (bytes === (latest?.snapshot ?? emptySnapshotBytes)) {
-            throw new LeverError(409, "nothing_to_publish", "draft matches the published config");
-          }
-          const row = repos.versions.insert({
-            environmentId,
-            version: latestNumber + 1,
-            snapshot: bytes,
-            author,
-          });
-          return { inserted: row, previous: latest, snapshot: built };
-        });
-        afterCommit(environmentId, inserted, snapshot);
-        return toPublished(inserted, diffAgainst(previous, snapshot));
-      } catch (error) {
-        if (isBusyError(error) || isConstraintError(error)) {
-          throw new LeverError(409, "publish_conflict", "another publish is in progress", {
-            cause: error,
-          });
+    async publish(environmentId, { author, expectedVersion }) {
+      await ensureEnvironment(environmentId);
+      const { inserted, previous, snapshot } = await withTransaction(db, async (txRepos) => {
+        const latest = await txRepos.versions.latest(environmentId);
+        const latestNumber = latest?.version ?? 0;
+        if (expectedVersion !== undefined && expectedVersion !== latestNumber) {
+          throw new LeverError(
+            409,
+            "publish_conflict",
+            `expected version ${expectedVersion} but latest is ${latestNumber}`,
+          );
         }
-        throw error;
-      }
+        // Validated at publish time so evaluation may assume well-formed
+        // snapshots (§4).
+        const built = snapshotSchema.parse(await buildDraftSnapshot(txRepos, environmentId));
+        const bytes = canonicalize(built);
+        if (bytes === (latest?.snapshot ?? emptySnapshotBytes)) {
+          throw new LeverError(409, "nothing_to_publish", "draft matches the published config");
+        }
+        const row = await txRepos.versions.insert({
+          environmentId,
+          version: latestNumber + 1,
+          snapshot: bytes,
+          author,
+        });
+        return { inserted: row, previous: latest, snapshot: built };
+      }).catch(asPublishConflict);
+      afterCommit(environmentId, inserted, snapshot);
+      return toPublished(inserted, diffAgainst(previous, snapshot));
     },
 
-    rollback(environmentId, version, author) {
-      ensureEnvironment(environmentId);
-      const target = repos.versions.get(environmentId, version);
+    async rollback(environmentId, version, author) {
+      await ensureEnvironment(environmentId);
+      const target = await repos.versions.get(environmentId, version);
       if (target === undefined) throw notFound("version");
       const snapshot = parseSnapshot(target.snapshot);
-      try {
-        const { inserted, previous } = withImmediateTransaction(db, () => {
-          rewriteDraft(environmentId, snapshot);
-          const rebuilt = canonicalize(buildDraftSnapshot(repos, environmentId));
-          if (rebuilt !== target.snapshot) {
-            // Publishing bytes the draft does not reproduce would desync the
-            // §8.4 invariant that rollback leaves draft === published.
-            throw new Error(`rollback: rewritten draft diverged from version ${version}`);
-          }
-          const latest = repos.versions.latest(environmentId);
-          // No nothing_to_publish check (§8.4): rolling back to the live
-          // version is the "reset a diverged draft" move, and the duplicate
-          // snapshot is itself audit-worthy.
-          const row = repos.versions.insert({
-            environmentId,
-            version: (latest?.version ?? 0) + 1,
-            snapshot: target.snapshot,
-            author,
-            rollbackOf: version,
-          });
-          return { inserted: row, previous: latest };
-        });
-        afterCommit(environmentId, inserted, snapshot);
-        return toPublished(inserted, diffAgainst(previous, snapshot));
-      } catch (error) {
-        if (isBusyError(error) || isConstraintError(error)) {
-          throw new LeverError(409, "publish_conflict", "another publish is in progress", {
-            cause: error,
-          });
+      const { inserted, previous } = await withTransaction(db, async (txRepos) => {
+        await rewriteDraft(txRepos, environmentId, snapshot);
+        const rebuilt = canonicalize(await buildDraftSnapshot(txRepos, environmentId));
+        if (rebuilt !== target.snapshot) {
+          // Publishing bytes the draft does not reproduce would desync the
+          // §8.4 invariant that rollback leaves draft === published.
+          throw new Error(`rollback: rewritten draft diverged from version ${version}`);
         }
-        throw error;
-      }
+        const latest = await txRepos.versions.latest(environmentId);
+        // No nothing_to_publish check (§8.4): rolling back to the live
+        // version is the "reset a diverged draft" move, and the duplicate
+        // snapshot is itself audit-worthy.
+        const row = await txRepos.versions.insert({
+          environmentId,
+          version: (latest?.version ?? 0) + 1,
+          snapshot: target.snapshot,
+          author,
+          rollbackOf: version,
+        });
+        return { inserted: row, previous: latest };
+      }).catch(asPublishConflict);
+      afterCommit(environmentId, inserted, snapshot);
+      return toPublished(inserted, diffAgainst(previous, snapshot));
     },
 
-    listVersions(environmentId) {
-      ensureEnvironment(environmentId);
-      const versions = repos.versions.list(environmentId);
+    async listVersions(environmentId) {
+      await ensureEnvironment(environmentId);
+      const versions = await repos.versions.list(environmentId);
       // Descending list; each diff is against its predecessor, derived on read (§3.4).
       return versions.map((entry, index) => {
         const predecessor = versions[index + 1];
@@ -283,12 +275,13 @@ export function createPublishService(
       });
     },
 
-    getVersion(environmentId, version) {
-      ensureEnvironment(environmentId);
-      const entry = repos.versions.get(environmentId, version);
+    async getVersion(environmentId, version) {
+      await ensureEnvironment(environmentId);
+      const entry = await repos.versions.get(environmentId, version);
       if (entry === undefined) throw notFound("version");
       const snapshot = parseSnapshot(entry.snapshot);
-      const predecessor = version > 1 ? repos.versions.get(environmentId, version - 1) : undefined;
+      const predecessor =
+        version > 1 ? await repos.versions.get(environmentId, version - 1) : undefined;
       return {
         version: entry.version,
         author: entry.author,

@@ -1,4 +1,5 @@
-import type { Database } from "bun:sqlite";
+import type { Db } from "./kysely";
+import type { VersionsTable } from "./schema";
 
 /**
  * `snapshot` is the canonical JSON bytes exactly as published (§3.3) — kept as
@@ -25,25 +26,16 @@ export interface VersionRepo {
     snapshot: string;
     author: string;
     rollbackOf?: number | undefined;
-  }): Version;
-  get(environmentId: string, version: number): Version | undefined;
-  latest(environmentId: string): Version | undefined;
+  }): Promise<Version>;
+  get(environmentId: string, version: number): Promise<Version | undefined>;
+  latest(environmentId: string): Promise<Version | undefined>;
   /** 0 when nothing is published — the §6.3 "version": 0 case. */
-  latestNumber(environmentId: string): number;
+  latestNumber(environmentId: string): Promise<number>;
   /** Descending, newest first (§8.5). */
-  list(environmentId: string): Version[];
+  list(environmentId: string): Promise<Version[]>;
 }
 
-interface VersionRow {
-  environment_id: string;
-  version: number;
-  snapshot: string;
-  author: string;
-  published_at: number;
-  rollback_of: number | null;
-}
-
-function toVersion(row: VersionRow): Version {
+function toVersion(row: VersionsTable): Version {
   return {
     environmentId: row.environment_id,
     version: row.version,
@@ -54,9 +46,9 @@ function toVersion(row: VersionRow): Version {
   };
 }
 
-export function createVersionRepo(db: Database): VersionRepo {
+export function createVersionRepo(db: Db): VersionRepo {
   return {
-    insert({ environmentId, version, snapshot, author, rollbackOf }) {
+    async insert({ environmentId, version, snapshot, author, rollbackOf }) {
       const row: Version = {
         environmentId,
         version,
@@ -65,50 +57,54 @@ export function createVersionRepo(db: Database): VersionRepo {
         publishedAt: Date.now(),
         rollbackOf: rollbackOf ?? null,
       };
-      db.query<undefined, [string, number, string, string, number, number | null]>(
-        `INSERT INTO versions (environment_id, version, snapshot, author, published_at, rollback_of)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(
-        row.environmentId,
-        row.version,
-        row.snapshot,
-        row.author,
-        row.publishedAt,
-        row.rollbackOf,
-      );
+      await db
+        .insertInto("versions")
+        .values({
+          environment_id: row.environmentId,
+          version: row.version,
+          snapshot: row.snapshot,
+          author: row.author,
+          published_at: row.publishedAt,
+          rollback_of: row.rollbackOf,
+        })
+        .execute();
       return row;
     },
-    get(environmentId, version) {
-      const row = db
-        .query<VersionRow, [string, number]>(
-          "SELECT * FROM versions WHERE environment_id = ? AND version = ?",
-        )
-        .get(environmentId, version);
-      return row === null ? undefined : toVersion(row);
+    async get(environmentId, version) {
+      const row = await db
+        .selectFrom("versions")
+        .selectAll()
+        .where("environment_id", "=", environmentId)
+        .where("version", "=", version)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toVersion(row);
     },
-    latest(environmentId) {
-      const row = db
-        .query<VersionRow, [string]>(
-          "SELECT * FROM versions WHERE environment_id = ? ORDER BY version DESC LIMIT 1",
-        )
-        .get(environmentId);
-      return row === null ? undefined : toVersion(row);
+    async latest(environmentId) {
+      const row = await db
+        .selectFrom("versions")
+        .selectAll()
+        .where("environment_id", "=", environmentId)
+        .orderBy("version", "desc")
+        .limit(1)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toVersion(row);
     },
-    latestNumber(environmentId) {
-      const row = db
-        .query<{ latest: number | null }, [string]>(
-          "SELECT MAX(version) AS latest FROM versions WHERE environment_id = ?",
-        )
-        .get(environmentId);
+    async latestNumber(environmentId) {
+      const row = await db
+        .selectFrom("versions")
+        .select((eb) => eb.fn.max("version").as("latest"))
+        .where("environment_id", "=", environmentId)
+        .executeTakeFirst();
       return row?.latest ?? 0;
     },
-    list(environmentId) {
-      return db
-        .query<VersionRow, [string]>(
-          "SELECT * FROM versions WHERE environment_id = ? ORDER BY version DESC",
-        )
-        .all(environmentId)
-        .map(toVersion);
+    async list(environmentId) {
+      const rows = await db
+        .selectFrom("versions")
+        .selectAll()
+        .where("environment_id", "=", environmentId)
+        .orderBy("version", "desc")
+        .execute();
+      return rows.map(toVersion);
     },
   };
 }
