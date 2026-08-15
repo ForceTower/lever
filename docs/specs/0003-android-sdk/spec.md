@@ -228,11 +228,16 @@ if (lever[Flags.enableEnrollment]) { … }
 
 Per spec 0002 §2.3, unchanged: absent → default (deduped `DEBUG` log); mismatch
 → default + one `WARN` per `(key, version, Kotlin type)`; decode-once
-memoization keyed by `(key, representation, requested type)`. Reads never throw
-and are never nullable. The type mapping row for Kotlin:
+memoization keyed by `(key, representation, requested type)`. `get`/`value`
+never throw and are never nullable. The type mapping row for Kotlin:
 `Boolean ↔ boolean`, `String ↔ string`, `Int`/`Long`/`Double ↔ number` (integer
 keys require an exactly-representable integer in the key's range),
 `@Serializable T ↔ json`.
+
+Spec 0002 §2.4's presence read is `lookup(key: LeverKey<V>): V?`, with the same
+one-path rule: `value(key) = lookup(key) ?: key.defaultValue`. It is the composite
+seam and nothing else — the operator form (`lever[key]`) stays non-optional, so
+the nullable read cannot be reached by accident from a hot read site.
 
 ## 3. Configuration validation
 

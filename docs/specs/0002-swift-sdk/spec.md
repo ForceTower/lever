@@ -218,6 +218,33 @@ and memoize in the snapshot, so JSON reads in `body` stay cheap — the requeste
 is part of the memo identity because a typed decoded value must never be served to a
 key expecting a different `Value`).
 
+### 2.4 The presence read
+
+`lookup(_:) -> Value?` is `value(for:)` without its last step: the same
+resolution, the same deduped log lines, the same `json` memo — but cases 1 and 2
+return `nil` rather than the default. `value(for:)` is then defined as
+`lookup(key) ?? key.defaultValue`, so there is one resolution path and the two
+cannot drift.
+
+It exists for one caller: a **composite** that layers lever over another config
+source during a migration — an app moving off Firebase Remote Config that wants
+lever to answer where it has an opinion and the old source to answer everywhere
+else (research 0001 §2). The default-serving read cannot express that; it
+commits to the code default the instant lever is silent, which shadows every
+layer beneath it and makes a half-populated environment indistinguishable from a
+complete one. `lookup` moves the code default to where a composite needs it: the
+floor under *all* the layers, still declared exactly once per key (§2.2).
+
+Mismatch maps to `nil` alongside absence deliberately — a value lever cannot
+serve is not an opinion lever holds, and falling through beats serving a default
+the layer below could have improved on. The `warn` still fires, so the
+misconfiguration stays visible.
+
+That is the whole of the addition: no `contains`, no raw-value accessor, no way
+to ask which layer answered. Anything richer would stand up a second resolution
+path beside §2.3's, and the two drifting is the failure this shape exists to
+prevent.
+
 ## 3. Configuration validation
 
 At `LeverClient.init` (all violations log through the sink; none throw). The policy
