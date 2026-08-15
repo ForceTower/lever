@@ -1,6 +1,9 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { createAdminAccountRepo, type AdminAccountRepo } from "./admin-account-repo";
+import { createAdminAuditRepo, type AdminAuditRepo } from "./admin-audit-repo";
+import { createAdminSessionRepo, type AdminSessionRepo } from "./admin-session-repo";
 import { createConditionRepo, type ConditionRepo } from "./condition-repo";
 import { createEnvironmentRepo, type EnvironmentRepo } from "./environment-repo";
 import type { Db } from "./kysely";
@@ -61,6 +64,9 @@ export interface Repos {
   conditions: ConditionRepo;
   parameters: ParameterRepo;
   versions: VersionRepo;
+  adminAccounts: AdminAccountRepo;
+  adminSessions: AdminSessionRepo;
+  adminAudit: AdminAuditRepo;
 }
 
 /**
@@ -75,6 +81,9 @@ export function createRepos(db: Db): Repos {
     conditions: createConditionRepo(db),
     parameters: createParameterRepo(db),
     versions: createVersionRepo(db),
+    adminAccounts: createAdminAccountRepo(db),
+    adminSessions: createAdminSessionRepo(db),
+    adminAudit: createAdminAuditRepo(db),
   };
 }
 

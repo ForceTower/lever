@@ -1,6 +1,6 @@
-# One image serves everything (spec 0001 §9.4): the API plus, once the
-# dashboard spec lands, the admin SPA's static build. Build from the repo
-# root: `docker build -f apps/api/Dockerfile .`
+# The API only (spec 0001 §9.4). The dashboard is a separate static SPA with its
+# own deployment at its own domain, so nothing here references apps/admin.
+# Build from the repo root: `docker build -f apps/api/Dockerfile .`
 
 FROM oven/bun:1 AS deps
 WORKDIR /app
@@ -23,9 +23,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY apps/api ./apps/api
 
-# The dashboard build lands here in a later spec; the slot exists now (§9.4).
-RUN mkdir -p apps/admin/dist \
-  && mkdir -p /data && chown -R bun:bun /data
+RUN mkdir -p /data && chown -R bun:bun /data
 
 USER bun
 EXPOSE 3000

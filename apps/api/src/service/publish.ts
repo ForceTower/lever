@@ -15,6 +15,15 @@ import {
   type SnapshotDiff,
 } from "./snapshot";
 
+/**
+ * Who published, per §3.2: the username is copied into the immutable row and is
+ * the durable record, the account id a best-effort join back to a live account.
+ */
+export interface Attribution {
+  author: string;
+  authorAccountId: string;
+}
+
 export interface PublishPreview {
   draftDirty: boolean;
   diff: SnapshotDiff;
@@ -50,10 +59,14 @@ export interface PublishService {
   preview(environmentId: string): Promise<PublishPreview>;
   publish(
     environmentId: string,
-    input: { author: string; expectedVersion?: number | undefined },
+    input: Attribution & { expectedVersion?: number | undefined },
   ): Promise<PublishedVersion>;
   /** Republishes version `n` as `N+1` after rewriting the draft to match it (§8.4). */
-  rollback(environmentId: string, version: number, author: string): Promise<PublishedVersion>;
+  rollback(
+    environmentId: string,
+    version: number,
+    attribution: Attribution,
+  ): Promise<PublishedVersion>;
   listVersions(environmentId: string): Promise<VersionSummary[]>;
   getVersion(environmentId: string, version: number): Promise<VersionDetail>;
 }
@@ -193,7 +206,7 @@ export function createPublishService(
       };
     },
 
-    async publish(environmentId, { author, expectedVersion }) {
+    async publish(environmentId, { author, authorAccountId, expectedVersion }) {
       await ensureEnvironment(environmentId);
       const { inserted, previous, snapshot } = await withTransaction(db, async (txRepos) => {
         const latest = await txRepos.versions.latest(environmentId);
@@ -217,6 +230,7 @@ export function createPublishService(
           version: latestNumber + 1,
           snapshot: bytes,
           author,
+          authorAccountId,
         });
         return { inserted: row, previous: latest, snapshot: built };
       }).catch(asPublishConflict);
@@ -224,7 +238,7 @@ export function createPublishService(
       return toPublished(inserted, diffAgainst(previous, snapshot));
     },
 
-    async rollback(environmentId, version, author) {
+    async rollback(environmentId, version, { author, authorAccountId }) {
       await ensureEnvironment(environmentId);
       const target = await repos.versions.get(environmentId, version);
       if (target === undefined) throw notFound("version");
@@ -246,6 +260,7 @@ export function createPublishService(
           version: (latest?.version ?? 0) + 1,
           snapshot: target.snapshot,
           author,
+          authorAccountId,
           rollbackOf: version,
         });
         return { inserted: row, previous: latest };

@@ -1,6 +1,7 @@
 # Spec 0003 — The Android SDK
 
-- **Status:** pre-implementation (settled 2026-08-14)
+- **Status:** pre-implementation (settled 2026-08-14); inherits spec 0002's
+  2026-08-14 transport amendment for the spec 0001 §5.1 response envelope.
 - **Research:** [0003 — lever-android](../../research/0003-android-sdk/research.md)
 - **Scope:** the Android client SDK — package layout, public API, concurrency
   mapping, platform integration, transport and storage deltas, tests. The wire

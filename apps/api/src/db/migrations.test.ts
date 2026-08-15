@@ -15,6 +15,12 @@ describe("runMigrations", () => {
     const db = openDb(":memory:");
     runMigrations(db);
     expect(tables(db)).toEqual([
+      "admin_accounts",
+      "admin_audit",
+      "admin_credentials",
+      "admin_enrollments",
+      "admin_grants",
+      "admin_sessions",
       "conditions",
       "environments",
       "migrations",
@@ -27,14 +33,17 @@ describe("runMigrations", () => {
       .query<{ name: string }, []>("SELECT name FROM migrations ORDER BY name")
       .all()
       .map((row) => row.name);
-    expect(recorded).toEqual(["0001-init"]);
+    expect(recorded).toEqual(["0001-init", "0002-admin-identity"]);
   });
 
   test("is idempotent — a second run applies nothing", () => {
     const db = openDb(":memory:");
     runMigrations(db);
+    const applied = db.query<{ c: number }, []>("SELECT COUNT(*) AS c FROM migrations").get()?.c;
     runMigrations(db);
-    expect(db.query<{ c: number }, []>("SELECT COUNT(*) AS c FROM migrations").get()?.c).toBe(1);
+    expect(db.query<{ c: number }, []>("SELECT COUNT(*) AS c FROM migrations").get()?.c).toBe(
+      applied ?? 0,
+    );
   });
 
   test("applies pending migrations in name order regardless of list order", () => {

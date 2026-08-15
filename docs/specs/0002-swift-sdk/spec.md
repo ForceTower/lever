@@ -1,6 +1,9 @@
 # Spec 0002 — The Swift SDK
 
-- **Status:** pre-implementation (settled 2026-08-13)
+- **Status:** pre-implementation (settled 2026-08-13); transport amended 2026-08-14
+  for spec 0001 §5.1's response envelope, and the amendment is **implemented** in
+  `lever-swift` — its contract-fixture pin still needs bumping to a lever revision
+  carrying the re-recorded tapes.
 - **Research:** [0002 — lever-swift](../../research/0002-swift-sdk/research.md)
 - **Scope:** the Swift client SDK — package layout, public API, concurrency model,
   lifecycle and scheduling, transport, cache format, observation, tests. The wire
@@ -447,13 +450,23 @@ query items (`platform`, `appVersion`, `clientId`, `attr.{name}` — spec 0001 �
 and `If-None-Match: {etag}` when the newest representation (staged, else
 activated — §4) carries one.
 
-- **200** → decode `{version, values}` — `version` must be a non-negative integer
-  representable as `Int`; any shape violation → `invalidResponse` — and stage the
-  new representation with its response `ETag` and `fetchedAt` (§4). Decode
-  failure is **atomic**: an invalid body changes nothing — no staged
-  representation, no metadata, no clock. A 200 with no `ETag` header is accepted;
-  the staged representation carries a nil ETag and later requests send no
-  `If-None-Match` for it.
+- **200** → decode the spec 0001 §5.1 envelope, then `data` as `{version, values}`
+  — `version` must be a non-negative integer representable as `Int`; any shape
+  violation → `invalidResponse` — and stage the new representation with its
+  response `ETag` and `fetchedAt` (§4). Decode failure is **atomic**: an invalid
+  body changes nothing — no staged representation, no metadata, no clock. A 200
+  with no `ETag` header is accepted; the staged representation carries a nil ETag
+  and later requests send no `If-None-Match` for it.
+  - An envelope with `ok: false`, or with `data` null or absent, is
+    `invalidResponse` — **never** an empty `values` map. The distinction matters:
+    treating it as empty would resolve every key to its code default while the
+    previous snapshot was still perfectly serviceable, silently collapsing the
+    three-layer floor (research 0001 §4.4) on a server that was reachable.
+  - `message` is decoded but ignored, and `error.code` on a non-2xx is surfaced
+    only in the log line, never in control flow — spec 0001 §5.1 makes `message`
+    explicitly non-contractual, and the status code already carries the branch.
+  - `values` staged into the cache file (§7) is the **`data` payload**, not the
+    envelope: the disk format keeps its own schema and gains no wrapper.
 - **304** → refresh the `fetchedAt` of the representation whose validator was
   sent (a 304 carries no version; its other headers are ignored):
   - staged confirmed → update staged `fetchedAt` only — staged metadata must
@@ -722,7 +735,9 @@ data-only like the evaluation set:
   "name": "resolve-repeat-304",
   "steps": [
     { "request": { "context": {} },
-      "response": { "status": 200, "etag": "\"abc\"", "body": { "version": 3, "values": { "…": "…" } } },
+      "response": { "status": 200, "etag": "\"abc\"",
+                    "body": { "ok": true, "message": "…", "error": null,
+                              "data": { "version": 3, "values": { "…": "…" } } } },
       "expect": { "activatedVersion": 3 } },
     { "request": { "context": {}, "ifNoneMatch": "\"abc\"" },
       "response": { "status": 304 },

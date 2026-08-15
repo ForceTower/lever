@@ -5,11 +5,14 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
-    "migrate": "bun run src/migrate.ts"
+    "migrate": "bun run src/migrate.ts",
+    "admin:enroll": "bun run src/admin-enroll.ts"
   },
   "dependencies": {
     "@loglayer/transport-pino": "^3.3.0",
+    "@simplewebauthn/server": "^13.3.2",
     "hono": "^4.13.2",
+    "jose": "^6.2.8",
     "kysely": "^0.29.5",
     "loglayer": "^9.4.0",
     "pino": "^10.3.1",

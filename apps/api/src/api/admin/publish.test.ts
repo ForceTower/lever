@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { createTestApp, type TestApp, type TestRequestInit } from "../../test-support";
+import { createTestApp, type TestApp, type TestRequestInit, dataOf } from "../../test-support";
 
 type Request = TestApp["request"];
 
@@ -14,24 +14,24 @@ const put = (body: unknown): TestRequestInit => ({ method: "PUT", body });
 
 /** A project + environment with one condition and one boolean parameter. */
 async function seed(request: Request) {
-  const project = await (
-    await request("/v1/admin/projects", post({ key: "acme", name: "Acme" }))
-  ).json();
-  const environment = await (
-    await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "prod" }))
-  ).json();
-  const condition = await (
+  const project = await dataOf(
+    await request("/v1/admin/projects", post({ key: "acme", name: "Acme" })),
+  );
+  const environment = await dataOf(
+    await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "prod" })),
+  );
+  const condition = await dataOf(
     await request(
       `/v1/admin/environments/${environment.id}/conditions`,
       post({ name: "android", clauses: [{ kind: "platform", op: "eq", value: "android" }] }),
-    )
-  ).json();
-  const parameter = await (
+    ),
+  );
+  const parameter = await dataOf(
     await request(
       `/v1/admin/environments/${environment.id}/parameters`,
       post({ key: "enable_thing", type: "boolean", defaultValue: false, description: "keep me" }),
-    )
-  ).json();
+    ),
+  );
   await request(
     `/v1/admin/parameters/${parameter.id}/conditional-values`,
     put([{ conditionId: condition.id, value: true }]),
@@ -50,13 +50,13 @@ describe("publish", () => {
 
     const res = await publish(request, environment.id);
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await dataOf(res);
     expect(body.version).toBe(1);
     expect(body.author).toBe("test");
     expect(body.rollbackOf).toBeNull();
     expect(body.diff.added.map((e: { key: string }) => e.key)).toEqual(["enable_thing"]);
 
-    const detail = await (await request(`/v1/admin/environments/${environment.id}`)).json();
+    const detail = await dataOf(await request(`/v1/admin/environments/${environment.id}`));
     expect(detail.latestVersion).toBe(1);
     expect(detail.draftDirty).toBe(false);
   });
@@ -65,12 +65,12 @@ describe("publish", () => {
     const { request } = createTestApp();
     const { environment } = await seed(request);
 
-    const preview = await (await request(`/v1/admin/environments/${environment.id}/diff`)).json();
+    const preview = await dataOf(await request(`/v1/admin/environments/${environment.id}/diff`));
     expect(preview.draftDirty).toBe(true);
     expect(preview.diff.added).toHaveLength(1);
 
     await publish(request, environment.id);
-    const after = await (await request(`/v1/admin/environments/${environment.id}/diff`)).json();
+    const after = await dataOf(await request(`/v1/admin/environments/${environment.id}/diff`));
     expect(after.draftDirty).toBe(false);
     expect(after.diff).toEqual({ added: [], removed: [], changed: [] });
   });
@@ -84,12 +84,12 @@ describe("publish", () => {
     expect(unchanged.status).toBe(409);
     expect((await unchanged.json()).error.code).toBe("nothing_to_publish");
 
-    const project = await (
-      await request("/v1/admin/projects", post({ key: "other", name: "Other" }))
-    ).json();
-    const empty = await (
-      await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "prod" }))
-    ).json();
+    const project = await dataOf(
+      await request("/v1/admin/projects", post({ key: "other", name: "Other" })),
+    );
+    const empty = await dataOf(
+      await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "prod" })),
+    );
     const emptyPublish = await publish(request, empty.id);
     expect(emptyPublish.status).toBe(409);
     expect((await emptyPublish.json()).error.code).toBe("nothing_to_publish");
@@ -169,7 +169,7 @@ describe("versions", () => {
     await request(`/v1/admin/parameters/${parameter.id}`, patch({ defaultValue: true }));
     await publish(request, environment.id);
 
-    const list = await (await request(`/v1/admin/environments/${environment.id}/versions`)).json();
+    const list = await dataOf(await request(`/v1/admin/environments/${environment.id}/versions`));
     expect(list.map((v: { version: number }) => v.version)).toEqual([2, 1]);
     expect(list[0].diff).toEqual({ added: 0, removed: 0, changed: 1 });
     expect(list[1].diff).toEqual({ added: 1, removed: 0, changed: 0 });
@@ -182,7 +182,7 @@ describe("versions", () => {
     await request(`/v1/admin/parameters/${parameter.id}`, patch({ defaultValue: true }));
     await publish(request, environment.id);
 
-    const v2 = await (await request(`/v1/admin/environments/${environment.id}/versions/2`)).json();
+    const v2 = await dataOf(await request(`/v1/admin/environments/${environment.id}/versions/2`));
     expect(v2.snapshot.format).toBe(1);
     expect(v2.snapshot.parameters.enable_thing.defaultValue).toBe(true);
     // The description is draft-only operator metadata — never in the snapshot (§3.3).
@@ -227,7 +227,7 @@ describe("rollback (§8.4)", () => {
       post(),
     );
     expect(res.status).toBe(201);
-    const v3 = await res.json();
+    const v3 = await dataOf(res);
     expect(v3.version).toBe(3);
     expect(v3.rollbackOf).toBe(1);
 
@@ -238,28 +238,28 @@ describe("rollback (§8.4)", () => {
 
     // The draft now matches v1: same parameter row (id and description
     // survive), the extra parameter is gone, the condition is retargeted back.
-    const detail = await (await request(`/v1/admin/environments/${environment.id}`)).json();
+    const detail = await dataOf(await request(`/v1/admin/environments/${environment.id}`));
     expect(detail.latestVersion).toBe(3);
     expect(detail.draftDirty).toBe(false);
-    const parameters = await (
-      await request(`/v1/admin/environments/${environment.id}/parameters`)
-    ).json();
+    const parameters = await dataOf(
+      await request(`/v1/admin/environments/${environment.id}/parameters`),
+    );
     expect(parameters).toHaveLength(1);
     expect(parameters[0].id).toBe(parameter.id);
     expect(parameters[0].description).toBe("keep me");
     expect(parameters[0].defaultValue).toBe(false);
-    const rolledCondition = await (await request(`/v1/admin/conditions/${condition.id}`)).json();
+    const rolledCondition = await dataOf(await request(`/v1/admin/conditions/${condition.id}`));
     expect(rolledCondition.clauses[0].value).toBe("android");
 
     // The unreferenced condition survives the rewrite — the operator's
     // condition library is not rollback's to destroy.
-    const conditions = await (
-      await request(`/v1/admin/environments/${environment.id}/conditions`)
-    ).json();
+    const conditions = await dataOf(
+      await request(`/v1/admin/environments/${environment.id}/conditions`),
+    );
     expect(conditions.map((entry: { name: string }) => entry.name)).toContain("unreferenced");
 
     // History is append-only across rollback.
-    const list = await (await request(`/v1/admin/environments/${environment.id}/versions`)).json();
+    const list = await dataOf(await request(`/v1/admin/environments/${environment.id}/versions`));
     expect(list.map((entry: { version: number }) => entry.version)).toEqual([3, 2, 1]);
   });
 
@@ -273,7 +273,7 @@ describe("rollback (§8.4)", () => {
       post(),
     );
     expect(res.status).toBe(201);
-    const v2 = await res.json();
+    const v2 = await dataOf(res);
     expect(v2.version).toBe(2);
     expect(v2.rollbackOf).toBe(1);
   });

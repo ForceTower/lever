@@ -29,13 +29,18 @@
         "status": 200,
         "etag": "\"60495a641acfc844\"",
         "body": {
-          "values": {
-            "enable_enrollment": {
-              "type": "boolean",
-              "value": true
-            }
+          "ok": true,
+          "message": "Configuration resolved",
+          "data": {
+            "values": {
+              "enable_enrollment": {
+                "type": "boolean",
+                "value": true
+              }
+            },
+            "version": 1
           },
-          "version": 1
+          "error": null
         }
       },
       "expect": {

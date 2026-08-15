@@ -1,8 +1,9 @@
-import type { Hono } from "hono";
 import { z } from "zod";
-import type { ParametersService } from "../../service/admin/parameters";
 import { jsonValueSchema, parameterTypeSchema } from "../../service/snapshot";
-import { createHono, zValidator, type AppEnv } from "../index";
+import { createHono, ok, zValidator } from "../index";
+import { requirePermission } from "../middleware";
+
+export const parameterRoutes = createHono();
 
 const parameterKeySchema = z
   .string()
@@ -29,38 +30,55 @@ const conditionalValuesBodySchema = z.array(
   z.strictObject({ conditionId: z.string(), value: jsonValueSchema }),
 );
 
-export function createParameterRoutes(parameters: ParametersService): Hono<AppEnv> {
-  const app = createHono();
+parameterRoutes.get(
+  "/environments/:envId/parameters",
+  requirePermission("config:read"),
+  async (c) =>
+    ok("Parameters", await c.env.services.parameters.listByEnvironment(c.req.param("envId"))),
+);
 
-  app.get("/environments/:envId/parameters", async (c) =>
-    c.json(await parameters.listByEnvironment(c.req.param("envId"))),
-  );
+parameterRoutes.post(
+  "/environments/:envId/parameters",
+  requirePermission("config:write"),
+  zValidator("json", createBodySchema),
+  async (c) =>
+    ok(
+      "Parameter created",
+      await c.env.services.parameters.create(c.req.param("envId"), c.req.valid("json")),
+      201,
+    ),
+);
 
-  app.post("/environments/:envId/parameters", zValidator("json", createBodySchema), async (c) =>
-    c.json(await parameters.create(c.req.param("envId"), c.req.valid("json")), 201),
-  );
+parameterRoutes.get("/parameters/:parameterId", requirePermission("config:read"), async (c) =>
+  ok("Parameter", await c.env.services.parameters.get(c.req.param("parameterId"))),
+);
 
-  app.get("/parameters/:parameterId", async (c) =>
-    c.json(await parameters.get(c.req.param("parameterId"))),
-  );
+parameterRoutes.patch(
+  "/parameters/:parameterId",
+  requirePermission("config:write"),
+  zValidator("json", patchBodySchema),
+  async (c) =>
+    ok(
+      "Parameter updated",
+      await c.env.services.parameters.update(c.req.param("parameterId"), c.req.valid("json")),
+    ),
+);
 
-  app.patch("/parameters/:parameterId", zValidator("json", patchBodySchema), async (c) =>
-    c.json(await parameters.update(c.req.param("parameterId"), c.req.valid("json"))),
-  );
+parameterRoutes.delete("/parameters/:parameterId", requirePermission("config:write"), async (c) => {
+  await c.env.services.parameters.remove(c.req.param("parameterId"));
+  return ok("Parameter deleted");
+});
 
-  app.delete("/parameters/:parameterId", async (c) => {
-    await parameters.remove(c.req.param("parameterId"));
-    return c.body(null, 204);
-  });
-
-  app.put(
-    "/parameters/:parameterId/conditional-values",
-    zValidator("json", conditionalValuesBodySchema),
-    async (c) =>
-      c.json(
-        await parameters.replaceConditionalValues(c.req.param("parameterId"), c.req.valid("json")),
+parameterRoutes.put(
+  "/parameters/:parameterId/conditional-values",
+  requirePermission("config:write"),
+  zValidator("json", conditionalValuesBodySchema),
+  async (c) =>
+    ok(
+      "Conditional values replaced",
+      await c.env.services.parameters.replaceConditionalValues(
+        c.req.param("parameterId"),
+        c.req.valid("json"),
       ),
-  );
-
-  return app;
-}
+    ),
+);

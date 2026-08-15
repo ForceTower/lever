@@ -55,7 +55,9 @@ replays the `response` of every step through its transport double, asserts the
         "query": "platform=ios&appVersion=5.2.0&clientId=…&attr.locale=pt-BR",
         "ifNoneMatch": { "fromStep": 1 }, // send the ETag recorded by step 1 (1-based)
       },
-      "response": { "status": 304, "etag": "\"…\"", "body": null }, // recorded, never hand-edited
+      // recorded, never hand-edited; `body` is the full spec 0001 §5.1 envelope
+      // ({ ok, message, data, error }), null on a 304
+      "response": { "status": 304, "etag": "\"…\"", "body": null },
       "expect": {
         "activatedVersion": 1,
         "changed": false,
@@ -78,9 +80,15 @@ Notes that make the tapes replayable in any language:
 - **The client key is fixed at configure time.** `"before": "rotate-key"` rotates the
   environment's key server-side while the client keeps sending the old one — that is
   how the 401 tape is produced, not by a special-cased response.
-- **`response` is a recording.** ETags are SHA-256 over the canonical response body,
-  so a matching ETag pins the exact bytes, not merely an equivalent JSON shape.
-  Regenerate with `bun run fixtures:update` rather than editing by hand.
+- **`response` is a recording.** ETags are SHA-256 over the canonical response
+  **payload** — `body.data`, not the envelope around it (spec 0001 §5.1, §6.4) — so a
+  matching ETag pins the exact bytes of the resolved config, not merely an equivalent
+  JSON shape. Regenerate with `bun run fixtures:update` rather than editing by hand.
+- **`body.message` is recorded verbatim but is not a contract.** Resolve's message is a
+  single constant, so the recording stays a faithful capture with no normalization step
+  — but spec 0001 §5.1 makes it explicitly non-contractual: an SDK must decode it and
+  ignore it, and no replay may assert it. Everything else in the envelope is asserted:
+  an `ok: false` or absent `data` is a fetch failure, never an empty `values` map.
 - **`expect.reads[].type`** names the SDK-side key type, not the wire type — that is
   the point of the mismatch tape. `boolean`, `string`, `int`, `double`, and `json`
   (decoded into a string-to-string map, so a non-string member is a decode failure

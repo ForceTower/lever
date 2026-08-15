@@ -1,7 +1,9 @@
-import type { Hono } from "hono";
 import { z } from "zod";
-import type { PublishService } from "../../service/publish";
-import { createHono, zValidator, type AppEnv } from "../index";
+import { createHono, ok, zValidator, type LeverContext } from "../index";
+import { requirePermission } from "../middleware";
+
+/** Publish preview, publish, version history, rollback (§8.3–§8.5). */
+export const versionRoutes = createHono();
 
 const publishBodySchema = z.strictObject({
   expectedVersion: z.number().int().nonnegative().optional(),
@@ -10,41 +12,58 @@ const publishBodySchema = z.strictObject({
 // z.object (not strict) — the param bag also carries envId.
 const versionParamSchema = z.object({ n: z.coerce.number().int().positive() });
 
-/** Publish preview, publish, version history, rollback (§8.3–§8.5). */
-export function createVersionRoutes(publish: PublishService): Hono<AppEnv> {
-  const app = createHono();
+/** §3.2: the username is the durable record, the account id a best-effort join. */
+function attribution(c: LeverContext): { author: string; authorAccountId: string } {
+  const { account } = c.get("admin");
+  return { author: account.username, authorAccountId: account.id };
+}
 
-  app.get("/environments/:envId/diff", async (c) =>
-    c.json(await publish.preview(c.req.param("envId"))),
-  );
+versionRoutes.get("/environments/:envId/diff", requirePermission("config:read"), async (c) =>
+  ok("Publish preview", await c.env.services.publish.preview(c.req.param("envId"))),
+);
 
-  app.post("/environments/:envId/publish", zValidator("json", publishBodySchema), async (c) =>
-    c.json(
-      await publish.publish(c.req.param("envId"), {
-        author: c.get("adminName"),
+versionRoutes.post(
+  "/environments/:envId/publish",
+  requirePermission("config:publish"),
+  zValidator("json", publishBodySchema),
+  async (c) =>
+    ok(
+      "Published",
+      await c.env.services.publish.publish(c.req.param("envId"), {
+        ...attribution(c),
         expectedVersion: c.req.valid("json").expectedVersion,
       }),
       201,
     ),
-  );
+);
 
-  app.get("/environments/:envId/versions", async (c) =>
-    c.json(await publish.listVersions(c.req.param("envId"))),
-  );
+versionRoutes.get("/environments/:envId/versions", requirePermission("config:read"), async (c) =>
+  ok("Versions", await c.env.services.publish.listVersions(c.req.param("envId"))),
+);
 
-  app.get("/environments/:envId/versions/:n", zValidator("param", versionParamSchema), async (c) =>
-    c.json(await publish.getVersion(c.req.param("envId"), c.req.valid("param").n)),
-  );
+versionRoutes.get(
+  "/environments/:envId/versions/:n",
+  requirePermission("config:read"),
+  zValidator("param", versionParamSchema),
+  async (c) =>
+    ok(
+      "Version",
+      await c.env.services.publish.getVersion(c.req.param("envId"), c.req.valid("param").n),
+    ),
+);
 
-  app.post(
-    "/environments/:envId/versions/:n/rollback",
-    zValidator("param", versionParamSchema),
-    async (c) =>
-      c.json(
-        await publish.rollback(c.req.param("envId"), c.req.valid("param").n, c.get("adminName")),
-        201,
+versionRoutes.post(
+  "/environments/:envId/versions/:n/rollback",
+  requirePermission("config:publish"),
+  zValidator("param", versionParamSchema),
+  async (c) =>
+    ok(
+      "Rolled back",
+      await c.env.services.publish.rollback(
+        c.req.param("envId"),
+        c.req.valid("param").n,
+        attribution(c),
       ),
-  );
-
-  return app;
-}
+      201,
+    ),
+);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "../app";
 import { buildEnv } from "../env";
-import { createTestApp, type TestApp, type TestRequestInit } from "../test-support";
+import { createTestApp, type TestApp, type TestRequestInit, dataOf } from "../test-support";
 
 type Request = TestApp["request"];
 
@@ -15,13 +15,13 @@ const put = (body: unknown): TestRequestInit => ({ method: "PUT", body });
  * android ≥ 5.2.0) and `greeting` (string, "hello", "olá" when attr.locale=pt).
  */
 async function seed(request: Request) {
-  const project = await (
-    await request("/v1/admin/projects", post({ key: "acme", name: "Acme" }))
-  ).json();
-  const environment = await (
-    await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "prod" }))
-  ).json();
-  const android = await (
+  const project = await dataOf(
+    await request("/v1/admin/projects", post({ key: "acme", name: "Acme" })),
+  );
+  const environment = await dataOf(
+    await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "prod" })),
+  );
+  const android = await dataOf(
     await request(
       `/v1/admin/environments/${environment.id}/conditions`,
       post({
@@ -31,33 +31,33 @@ async function seed(request: Request) {
           { kind: "appVersion", op: "gte", value: "5.2.0" },
         ],
       }),
-    )
-  ).json();
-  const portuguese = await (
+    ),
+  );
+  const portuguese = await dataOf(
     await request(
       `/v1/admin/environments/${environment.id}/conditions`,
       post({
         name: "pt",
         clauses: [{ kind: "attribute", attribute: "locale", op: "eq", value: "pt" }],
       }),
-    )
-  ).json();
-  const enableThing = await (
+    ),
+  );
+  const enableThing = await dataOf(
     await request(
       `/v1/admin/environments/${environment.id}/parameters`,
       post({ key: "enable_thing", type: "boolean", defaultValue: false }),
-    )
-  ).json();
+    ),
+  );
   await request(
     `/v1/admin/parameters/${enableThing.id}/conditional-values`,
     put([{ conditionId: android.id, value: true }]),
   );
-  const greeting = await (
+  const greeting = await dataOf(
     await request(
       `/v1/admin/environments/${environment.id}/parameters`,
       post({ key: "greeting", type: "string", defaultValue: "hello" }),
-    )
-  ).json();
+    ),
+  );
   await request(
     `/v1/admin/parameters/${greeting.id}/conditional-values`,
     put([{ conditionId: portuguese.id, value: "olá" }]),
@@ -77,31 +77,31 @@ describe("resolve", () => {
 
     const defaults = await resolve(request, environment.clientKey);
     expect(defaults.status).toBe(200);
-    const body = await defaults.json();
+    const body = await dataOf(defaults);
     expect(body.version).toBe(1);
     expect(body.values.enable_thing).toEqual({ type: "boolean", value: false });
     expect(body.values.greeting).toEqual({ type: "string", value: "hello" });
 
-    const matched = await (
-      await resolve(request, environment.clientKey, "&platform=Android&appVersion=5.3.1")
-    ).json();
+    const matched = await dataOf(
+      await resolve(request, environment.clientKey, "&platform=Android&appVersion=5.3.1"),
+    );
     expect(matched.values.enable_thing).toEqual({ type: "boolean", value: true });
 
     // AND of clauses: right platform but version below the floor.
-    const below = await (
-      await resolve(request, environment.clientKey, "&platform=android&appVersion=5.1.0")
-    ).json();
+    const below = await dataOf(
+      await resolve(request, environment.clientKey, "&platform=android&appVersion=5.1.0"),
+    );
     expect(below.values.enable_thing.value).toBe(false);
 
     // Invalid semver in context never matches a version clause (§4).
-    const invalid = await (
-      await resolve(request, environment.clientKey, "&platform=android&appVersion=5.2")
-    ).json();
+    const invalid = await dataOf(
+      await resolve(request, environment.clientKey, "&platform=android&appVersion=5.2"),
+    );
     expect(invalid.values.enable_thing.value).toBe(false);
 
-    const attribute = await (
-      await resolve(request, environment.clientKey, "&attr.locale=pt")
-    ).json();
+    const attribute = await dataOf(
+      await resolve(request, environment.clientKey, "&attr.locale=pt"),
+    );
     expect(attribute.values.greeting.value).toBe("olá");
   });
 
@@ -122,12 +122,12 @@ describe("resolve", () => {
   test("a never-published environment resolves version 0, not 401 (§6.3)", async () => {
     const { request } = createTestApp();
     const { project } = await seed(request);
-    const fresh = await (
-      await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "staging" }))
-    ).json();
+    const fresh = await dataOf(
+      await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "staging" })),
+    );
     const res = await resolve(request, fresh.clientKey);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ version: 0, values: {} });
+    expect(await dataOf(res)).toEqual({ version: 0, values: {} });
   });
 
   test("ETag is a strong validator: 304 on match, new ETag after publish", async () => {
@@ -164,7 +164,7 @@ describe("resolve", () => {
     });
     expect(republished.status).toBe(200);
     expect(republished.headers.get("ETag")).not.toBe(etag);
-    expect((await republished.json()).version).toBe(2);
+    expect((await dataOf(republished)).version).toBe(2);
   });
 
   test("draft edits stay invisible until the next publish (§8.2)", async () => {
@@ -172,11 +172,11 @@ describe("resolve", () => {
     const { environment, enableThing } = await seed(request);
 
     await request(`/v1/admin/parameters/${enableThing.id}`, patch({ defaultValue: true }));
-    const stale = await (await resolve(request, environment.clientKey)).json();
+    const stale = await dataOf(await resolve(request, environment.clientKey));
     expect(stale.values.enable_thing.value).toBe(false);
 
     await request(`/v1/admin/environments/${environment.id}/publish`, post());
-    const fresh = await (await resolve(request, environment.clientKey)).json();
+    const fresh = await dataOf(await resolve(request, environment.clientKey));
     expect(fresh.values.enable_thing.value).toBe(true);
   });
 
@@ -200,9 +200,9 @@ describe("resolve", () => {
     const { request } = createTestApp();
     const { environment } = await seed(request);
 
-    const rotated = await (
-      await request(`/v1/admin/environments/${environment.id}/rotate-key`, post())
-    ).json();
+    const rotated = await dataOf(
+      await request(`/v1/admin/environments/${environment.id}/rotate-key`, post()),
+    );
     expect((await resolve(request, environment.clientKey)).status).toBe(401);
     expect((await resolve(request, rotated.clientKey)).status).toBe(200);
 
@@ -213,7 +213,8 @@ describe("resolve", () => {
     expect((await resolve(request, rotated.clientKey)).status).toBe(401);
   });
 
-  test("CORS answers the read surface and exposes the ETag; admin gets none (§5)", async () => {
+  // §5.3: two allowlists, because they are two trust tiers.
+  test("the read surface answers any origin and exposes the ETag", async () => {
     const { app, request } = createTestApp();
     const { environment } = await seed(request);
 
@@ -221,20 +222,50 @@ describe("resolve", () => {
       headers: { Origin: "https://app.example" },
     });
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    // Without this browsers hide the ETag and the 304 path degrades to refetches.
     expect(res.headers.get("Access-Control-Expose-Headers")).toContain("ETag");
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
 
-    const admin = await request("/v1/admin/projects", {
-      headers: { Origin: "https://app.example" },
+  test("the admin surface answers only its configured origin", async () => {
+    const { request } = createTestApp();
+
+    const allowed = await request("/v1/admin/projects", {
+      headers: { Origin: "https://portal.lever.test" },
     });
-    expect(admin.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("https://portal.lever.test");
+    // The session is a bearer token, never a cookie — nothing for a browser to
+    // attach implicitly, so credentials mode is never enabled (§8.1.4).
+    expect(allowed.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+
+    const hostile = await request("/v1/admin/projects", {
+      headers: { Origin: "https://evil.example" },
+    });
+    expect(hostile.headers.get("Access-Control-Allow-Origin")).not.toBe("https://evil.example");
+  });
+
+  test("an admin preflight from the portal advertises the mutating methods", async () => {
+    const { app } = createTestApp();
+    const res = await app.request("/v1/admin/projects", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://portal.lever.test",
+        "Access-Control-Request-Method": "DELETE",
+        "Access-Control-Request-Headers": "Authorization",
+      },
+    });
+    expect(res.status).toBeLessThan(300);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://portal.lever.test");
+    expect(res.headers.get("Access-Control-Allow-Methods")).toContain("DELETE");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
   });
 
   test("a fresh process serves resolve from the warmed cache (§6.4)", async () => {
     const { request, env } = createTestApp();
     const { environment, project } = await seed(request);
-    const neverPublished = await (
-      await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "staging" }))
-    ).json();
+    const neverPublished = await dataOf(
+      await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "staging" })),
+    );
 
     // Same database, new registry — simulates a restart.
     const restarted = buildEnv(env.vars, env.sqlite);
@@ -245,7 +276,7 @@ describe("resolve", () => {
       `/v1/resolve?key=${environment.clientKey}&platform=android&appVersion=6.0.0`,
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await dataOf(res);
     expect(body.version).toBe(1);
     expect(body.values.enable_thing.value).toBe(true);
 
@@ -253,6 +284,6 @@ describe("resolve", () => {
     // environment resolves, it does not fall through to 401.
     const empty = await app.request(`/v1/resolve?key=${neverPublished.clientKey}`);
     expect(empty.status).toBe(200);
-    expect(await empty.json()).toEqual({ version: 0, values: {} });
+    expect(await dataOf(empty)).toEqual({ version: 0, values: {} });
   });
 });

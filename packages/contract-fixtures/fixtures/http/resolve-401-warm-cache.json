@@ -35,17 +35,22 @@
         "status": 200,
         "etag": "\"5b06166c2e6416d4\"",
         "body": {
-          "values": {
-            "enable_enrollment": {
-              "type": "boolean",
-              "value": true
+          "ok": true,
+          "message": "Configuration resolved",
+          "data": {
+            "values": {
+              "enable_enrollment": {
+                "type": "boolean",
+                "value": true
+              },
+              "greeting": {
+                "type": "string",
+                "value": "hello"
+              }
             },
-            "greeting": {
-              "type": "string",
-              "value": "hello"
-            }
+            "version": 1
           },
-          "version": 1
+          "error": null
         }
       },
       "expect": {
@@ -86,9 +91,11 @@
         "status": 401,
         "etag": null,
         "body": {
+          "ok": false,
+          "message": "unknown client key",
+          "data": null,
           "error": {
-            "code": "invalid_key",
-            "message": "unknown client key"
+            "code": "invalid_key"
           }
         }
       },

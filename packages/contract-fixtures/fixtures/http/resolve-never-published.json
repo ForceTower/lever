@@ -22,8 +22,13 @@
         "status": 200,
         "etag": "\"bc82c9e7976882cc\"",
         "body": {
-          "values": {},
-          "version": 0
+          "ok": true,
+          "message": "Configuration resolved",
+          "data": {
+            "values": {},
+            "version": 0
+          },
+          "error": null
         }
       },
       "expect": {

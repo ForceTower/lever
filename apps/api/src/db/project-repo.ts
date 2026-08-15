@@ -55,7 +55,9 @@ export function createProjectRepo(db: Db): ProjectRepo {
     },
     async remove(id) {
       const result = await db.deleteFrom("projects").where("id", "=", id).executeTakeFirst();
-      return result.numDeletedRows === 1n;
+      // `> 0n`, not `=== 1n`: SQLite reports cascaded child rows in the change
+      // count, so an entity with dependents deletes more than one row.
+      return result.numDeletedRows > 0n;
     },
   };
 }

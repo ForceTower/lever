@@ -4,13 +4,11 @@
  * evaluation is pure, and the body is canonical JSON so the ETag is a strong
  * validator over exact bytes.
  */
-import type { Hono } from "hono";
 import { LeverError } from "../error";
 import type { JsonValue } from "../service/canonicalize";
 import { canonicalize } from "../service/canonicalize";
 import { evaluate, type ResolveContext } from "../service/evaluate";
-import type { ResolveCache } from "../service/resolve-cache";
-import { createHono, type AppEnv } from "./index";
+import { createHono } from "./index";
 import { clientKeyAuth } from "./middleware";
 
 // Reserved query names: platform, appVersion, clientId, key (§6.2). The
@@ -20,6 +18,10 @@ const MAX_ATTRIBUTES = 20;
 const MAX_ATTRIBUTE_NAME = 64;
 const MAX_ATTRIBUTE_VALUE = 256;
 const MAX_RESERVED_VALUE = 64;
+
+// Constant, so the recorded contract fixtures stay a faithful capture without
+// needing a normalization step. `message` is non-contractual either way (§5.1).
+const RESOLVED_MESSAGE = JSON.stringify("Configuration resolved");
 
 function badContext(message: string): LeverError {
   return new LeverError(400, "validation_failed", message);
@@ -86,33 +88,34 @@ function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
   });
 }
 
-export function createResolveRoutes(cache: ResolveCache): Hono<AppEnv> {
-  const app = createHono();
+export const resolveRoutes = createHono();
 
-  app.get("/", clientKeyAuth(cache), (c) => {
-    const compiled = c.get("compiledEnv");
-    const context = parseResolveContext(c.req.queries());
+resolveRoutes.get("/", clientKeyAuth(), (c) => {
+  const compiled = c.get("compiledEnv");
+  const context = parseResolveContext(c.req.queries());
 
-    const values: Record<string, JsonValue> = {};
-    if (compiled.snapshot !== undefined) {
-      const evaluated = evaluate(compiled.snapshot, context, compiled.semverOperands);
-      for (const [key, resolved] of Object.entries(evaluated)) {
-        values[key] = { type: resolved.type, value: resolved.value };
-      }
+  const values: Record<string, JsonValue> = {};
+  if (compiled.snapshot !== undefined) {
+    const evaluated = evaluate(compiled.snapshot, context, compiled.semverOperands);
+    for (const [key, resolved] of Object.entries(evaluated)) {
+      values[key] = { type: resolved.type, value: resolved.value };
     }
-    // The §6.3 body, canonical bytes (§3.3) — the version is inside, so a
-    // publish always changes the ETag even if resolved values coincide.
-    const body = canonicalize({ version: compiled.version, values });
-    const etag = etagFor(body);
+  }
+  // The §6.3 payload, canonical bytes (§3.3) — the version is inside, so a
+  // publish always changes the ETag even if resolved values coincide.
+  const payload = canonicalize({ version: compiled.version, values });
+  // Hashed over the payload alone, never the envelope (§6.4): the validator
+  // is a function of resolved config, so no wording change to `message` can
+  // invalidate a client's cache.
+  const etag = etagFor(payload);
 
-    c.header("ETag", etag);
-    c.header("Cache-Control", "private, no-cache");
-    if (ifNoneMatchHits(c.req.header("If-None-Match"), etag)) {
-      return c.body(null, 304);
-    }
-    c.header("Content-Type", "application/json");
-    return c.body(body, 200);
-  });
-
-  return app;
-}
+  c.header("ETag", etag);
+  c.header("Cache-Control", "private, no-cache");
+  if (ifNoneMatchHits(c.req.header("If-None-Match"), etag)) {
+    return c.body(null, 304);
+  }
+  c.header("Content-Type", "application/json");
+  // Spliced rather than re-serialized so the canonical payload bytes the ETag
+  // covers are exactly the bytes on the wire.
+  return c.body(`{"ok":true,"message":${RESOLVED_MESSAGE},"data":${payload},"error":null}`, 200);
+});

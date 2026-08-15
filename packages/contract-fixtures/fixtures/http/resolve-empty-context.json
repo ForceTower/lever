@@ -72,21 +72,26 @@
         "status": 200,
         "etag": "\"68193faff823593e\"",
         "body": {
-          "values": {
-            "enable_enrollment": {
-              "type": "boolean",
-              "value": false
+          "ok": true,
+          "message": "Configuration resolved",
+          "data": {
+            "values": {
+              "enable_enrollment": {
+                "type": "boolean",
+                "value": false
+              },
+              "greeting": {
+                "type": "string",
+                "value": "hello"
+              },
+              "max_retries": {
+                "type": "number",
+                "value": 3
+              }
             },
-            "greeting": {
-              "type": "string",
-              "value": "hello"
-            },
-            "max_retries": {
-              "type": "number",
-              "value": 3
-            }
+            "version": 1
           },
-          "version": 1
+          "error": null
         }
       },
       "expect": {

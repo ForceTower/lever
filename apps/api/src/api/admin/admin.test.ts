@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createTestApp, type TestApp, type TestRequestInit } from "../../test-support";
+import { createTestApp, dataOf, type TestApp, type TestRequestInit } from "../../test-support";
 
 type Request = TestApp["request"];
 
@@ -12,13 +12,13 @@ const del = (body?: unknown): TestRequestInit =>
 async function createProject(request: Request, key = "acme") {
   const res = await request("/v1/admin/projects", post({ key, name: "Acme" }));
   expect(res.status).toBe(201);
-  return res.json();
+  return dataOf(res);
 }
 
 async function createEnvironment(request: Request, projectId: string, key = "prod") {
   const res = await request(`/v1/admin/projects/${projectId}/environments`, post({ key }));
   expect(res.status).toBe(201);
-  return res.json();
+  return dataOf(res);
 }
 
 const platformClause = { kind: "platform", op: "eq", value: "android" };
@@ -31,7 +31,7 @@ async function createCondition(
 ) {
   const res = await request(`/v1/admin/environments/${envId}/conditions`, post({ name, clauses }));
   expect(res.status).toBe(201);
-  return res.json();
+  return dataOf(res);
 }
 
 async function createParameter(
@@ -41,7 +41,7 @@ async function createParameter(
 ) {
   const res = await request(`/v1/admin/environments/${envId}/parameters`, post(body));
   expect(res.status).toBe(201);
-  return res.json();
+  return dataOf(res);
 }
 
 describe("app assembly", () => {
@@ -49,7 +49,7 @@ describe("app assembly", () => {
     const { request } = createTestApp();
     const res = await request("/healthz", { token: null });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await dataOf(res);
     expect(body.name).toBe("lever");
     expect(typeof body.version).toBe("string");
   });
@@ -62,11 +62,11 @@ describe("app assembly", () => {
   });
 
   test("malformed JSON bodies keep the §5 error shape", async () => {
-    const { app } = createTestApp();
+    const { app, signIn } = createTestApp();
     const res = await app.request("/v1/admin/projects", {
       method: "POST",
       headers: {
-        Authorization: `Bearer testsecrettestsecrettestsecret12`,
+        Authorization: `Bearer ${await signIn()}`,
         "Content-Type": "application/json",
       },
       body: "{not json",
@@ -101,14 +101,14 @@ describe("projects", () => {
     const project = await createProject(request);
     expect(project.key).toBe("acme");
 
-    const list = await (await request("/v1/admin/projects")).json();
+    const list = await dataOf(await request("/v1/admin/projects"));
     expect(list).toHaveLength(1);
 
-    const fetched = await (await request(`/v1/admin/projects/${project.id}`)).json();
+    const fetched = await dataOf(await request(`/v1/admin/projects/${project.id}`));
     expect(fetched.name).toBe("Acme");
 
     const renamed = await request(`/v1/admin/projects/${project.id}`, patch({ name: "Acme 2" }));
-    expect((await renamed.json()).name).toBe("Acme 2");
+    expect((await dataOf(renamed)).name).toBe("Acme 2");
   });
 
   test("invalid slugs fail validation with details", async () => {
@@ -143,7 +143,7 @@ describe("projects", () => {
     expect((await wrong.json()).error.code).toBe("confirm_mismatch");
 
     const ok = await request(`/v1/admin/projects/${project.id}`, del({ confirm: "acme" }));
-    expect(ok.status).toBe(204);
+    expect(ok.status).toBe(200);
     expect((await request(`/v1/admin/projects/${project.id}`)).status).toBe(404);
     expect((await request(`/v1/admin/environments/${environment.id}`)).status).toBe(404);
   });
@@ -178,12 +178,12 @@ describe("environments", () => {
     const project = await createProject(request);
     const environment = await createEnvironment(request, project.id);
 
-    const clean = await (await request(`/v1/admin/environments/${environment.id}`)).json();
+    const clean = await dataOf(await request(`/v1/admin/environments/${environment.id}`));
     expect(clean.latestVersion).toBe(0);
     expect(clean.draftDirty).toBe(false);
 
     await createParameter(request, environment.id);
-    const dirty = await (await request(`/v1/admin/environments/${environment.id}`)).json();
+    const dirty = await dataOf(await request(`/v1/admin/environments/${environment.id}`));
     expect(dirty.draftDirty).toBe(true);
   });
 
@@ -191,9 +191,9 @@ describe("environments", () => {
     const { request } = createTestApp();
     const project = await createProject(request);
     const environment = await createEnvironment(request, project.id);
-    const rotated = await (
-      await request(`/v1/admin/environments/${environment.id}/rotate-key`, { method: "POST" })
-    ).json();
+    const rotated = await dataOf(
+      await request(`/v1/admin/environments/${environment.id}/rotate-key`, { method: "POST" }),
+    );
     expect(rotated.clientKey).toMatch(/^pk_[0-9A-Za-z]{32}$/);
     expect(rotated.clientKey).not.toBe(environment.clientKey);
   });
@@ -205,7 +205,7 @@ describe("environments", () => {
     const wrong = await request(`/v1/admin/environments/${environment.id}`, del({ confirm: "no" }));
     expect(wrong.status).toBe(400);
     const ok = await request(`/v1/admin/environments/${environment.id}`, del({ confirm: "prod" }));
-    expect(ok.status).toBe(204);
+    expect(ok.status).toBe(200);
     expect((await request(`/v1/admin/environments/${environment.id}`)).status).toBe(404);
   });
 });
@@ -217,17 +217,15 @@ describe("conditions", () => {
     const environment = await createEnvironment(request, project.id);
     const condition = await createCondition(request, environment.id);
 
-    const list = await (
-      await request(`/v1/admin/environments/${environment.id}/conditions`)
-    ).json();
+    const list = await dataOf(await request(`/v1/admin/environments/${environment.id}/conditions`));
     expect(list).toHaveLength(1);
 
-    const updated = await (
+    const updated = await dataOf(
       await request(
         `/v1/admin/conditions/${condition.id}`,
         patch({ clauses: [{ kind: "appVersion", op: "gte", value: "5.2.0" }] }),
-      )
-    ).json();
+      ),
+    );
     expect(updated.clauses[0].kind).toBe("appVersion");
     expect(updated.name).toBe("android");
   });
@@ -283,7 +281,7 @@ describe("conditions", () => {
 
     await request(`/v1/admin/parameters/${parameter.id}/conditional-values`, put([]));
     const allowed = await request(`/v1/admin/conditions/${condition.id}`, del());
-    expect(allowed.status).toBe(204);
+    expect(allowed.status).toBe(200);
   });
 });
 
@@ -327,14 +325,14 @@ describe("parameters", () => {
     const environment = await createEnvironment(request, project.id);
     const parameter = await createParameter(request, environment.id);
 
-    const set = await (
-      await request(`/v1/admin/parameters/${parameter.id}`, patch({ description: "gates things" }))
-    ).json();
+    const set = await dataOf(
+      await request(`/v1/admin/parameters/${parameter.id}`, patch({ description: "gates things" })),
+    );
     expect(set.description).toBe("gates things");
 
-    const cleared = await (
-      await request(`/v1/admin/parameters/${parameter.id}`, patch({ description: null }))
-    ).json();
+    const cleared = await dataOf(
+      await request(`/v1/admin/parameters/${parameter.id}`, patch({ description: null })),
+    );
     expect(cleared.description).toBeNull();
   });
 
@@ -357,7 +355,7 @@ describe("parameters", () => {
     expect(refused.status).toBe(400);
 
     // The rejection rolled everything back.
-    const unchanged = await (await request(`/v1/admin/parameters/${parameter.id}`)).json();
+    const unchanged = await dataOf(await request(`/v1/admin/parameters/${parameter.id}`));
     expect(unchanged.type).toBe("boolean");
     expect(unchanged.defaultValue).toBe(false);
 
@@ -367,7 +365,7 @@ describe("parameters", () => {
       patch({ type: "string", defaultValue: "hello" }),
     );
     expect(accepted.status).toBe(200);
-    expect((await accepted.json()).type).toBe("string");
+    expect((await dataOf(accepted)).type).toBe("string");
   });
 
   test("delete removes the parameter", async () => {
@@ -375,7 +373,7 @@ describe("parameters", () => {
     const project = await createProject(request);
     const environment = await createEnvironment(request, project.id);
     const parameter = await createParameter(request, environment.id);
-    expect((await request(`/v1/admin/parameters/${parameter.id}`, del())).status).toBe(204);
+    expect((await request(`/v1/admin/parameters/${parameter.id}`, del())).status).toBe(200);
     expect((await request(`/v1/admin/parameters/${parameter.id}`)).status).toBe(404);
   });
 });
@@ -392,30 +390,30 @@ describe("conditional values", () => {
     const parameter = await createParameter(request, environment.id);
     const path = `/v1/admin/parameters/${parameter.id}/conditional-values`;
 
-    const first = await (
+    const first = await dataOf(
       await request(
         path,
         put([
           { conditionId: android.id, value: true },
           { conditionId: ios.id, value: false },
         ]),
-      )
-    ).json();
+      ),
+    );
     expect(first.map((cv: { conditionId: string }) => cv.conditionId)).toEqual([
       android.id,
       ios.id,
     ]);
     expect(first.map((cv: { position: number }) => cv.position)).toEqual([0, 1]);
 
-    const reordered = await (
+    const reordered = await dataOf(
       await request(
         path,
         put([
           { conditionId: ios.id, value: false },
           { conditionId: android.id, value: true },
         ]),
-      )
-    ).json();
+      ),
+    );
     expect(reordered.map((cv: { conditionId: string }) => cv.conditionId)).toEqual([
       ios.id,
       android.id,

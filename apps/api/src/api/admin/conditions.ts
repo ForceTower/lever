@@ -1,8 +1,9 @@
-import type { Hono } from "hono";
 import { z } from "zod";
-import type { ConditionsService } from "../../service/admin/conditions";
 import { clausesSchema } from "../../service/snapshot";
-import { createHono, zValidator, type AppEnv } from "../index";
+import { createHono, ok, zValidator } from "../index";
+import { requirePermission } from "../middleware";
+
+export const conditionRoutes = createHono();
 
 const conditionNameSchema = z.string().min(1).max(128);
 const createBodySchema = z.strictObject({ name: conditionNameSchema, clauses: clausesSchema });
@@ -11,29 +12,41 @@ const patchBodySchema = z.strictObject({
   clauses: clausesSchema.optional(),
 });
 
-export function createConditionRoutes(conditions: ConditionsService): Hono<AppEnv> {
-  const app = createHono();
+conditionRoutes.get(
+  "/environments/:envId/conditions",
+  requirePermission("config:read"),
+  async (c) =>
+    ok("Conditions", await c.env.services.conditions.listByEnvironment(c.req.param("envId"))),
+);
 
-  app.get("/environments/:envId/conditions", async (c) =>
-    c.json(await conditions.listByEnvironment(c.req.param("envId"))),
-  );
+conditionRoutes.post(
+  "/environments/:envId/conditions",
+  requirePermission("config:write"),
+  zValidator("json", createBodySchema),
+  async (c) =>
+    ok(
+      "Condition created",
+      await c.env.services.conditions.create(c.req.param("envId"), c.req.valid("json")),
+      201,
+    ),
+);
 
-  app.post("/environments/:envId/conditions", zValidator("json", createBodySchema), async (c) =>
-    c.json(await conditions.create(c.req.param("envId"), c.req.valid("json")), 201),
-  );
+conditionRoutes.get("/conditions/:conditionId", requirePermission("config:read"), async (c) =>
+  ok("Condition", await c.env.services.conditions.get(c.req.param("conditionId"))),
+);
 
-  app.get("/conditions/:conditionId", async (c) =>
-    c.json(await conditions.get(c.req.param("conditionId"))),
-  );
+conditionRoutes.patch(
+  "/conditions/:conditionId",
+  requirePermission("config:write"),
+  zValidator("json", patchBodySchema),
+  async (c) =>
+    ok(
+      "Condition updated",
+      await c.env.services.conditions.update(c.req.param("conditionId"), c.req.valid("json")),
+    ),
+);
 
-  app.patch("/conditions/:conditionId", zValidator("json", patchBodySchema), async (c) =>
-    c.json(await conditions.update(c.req.param("conditionId"), c.req.valid("json"))),
-  );
-
-  app.delete("/conditions/:conditionId", async (c) => {
-    await conditions.remove(c.req.param("conditionId"));
-    return c.body(null, 204);
-  });
-
-  return app;
-}
+conditionRoutes.delete("/conditions/:conditionId", requirePermission("config:write"), async (c) => {
+  await c.env.services.conditions.remove(c.req.param("conditionId"));
+  return ok("Condition deleted");
+});

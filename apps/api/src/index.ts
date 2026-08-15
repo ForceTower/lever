@@ -11,6 +11,9 @@ import { getLogger } from "./logger";
 const env = getEnv();
 runMigrations(env.sqlite);
 await env.resolveCache.warmUp(env.repos);
+// §8.1.4: drop session rows long past expiry. They stay joinable from audit
+// rows until then, which is why this is a sweep and not a delete-on-expiry.
+await env.services.adminAuth.sweepExpiredSessions();
 
 const app = createApp(env);
 const server = Bun.serve({

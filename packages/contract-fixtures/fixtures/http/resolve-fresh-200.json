@@ -90,28 +90,33 @@
         "status": 200,
         "etag": "\"4665329db5d5bec0\"",
         "body": {
-          "values": {
-            "enable_enrollment": {
-              "type": "boolean",
-              "value": true
-            },
-            "greeting": {
-              "type": "string",
-              "value": "olá"
-            },
-            "max_retries": {
-              "type": "number",
-              "value": 3
-            },
-            "paywall": {
-              "type": "json",
-              "value": {
-                "cta": "Start trial",
-                "headline": "Go Pro"
+          "ok": true,
+          "message": "Configuration resolved",
+          "data": {
+            "values": {
+              "enable_enrollment": {
+                "type": "boolean",
+                "value": true
+              },
+              "greeting": {
+                "type": "string",
+                "value": "olá"
+              },
+              "max_retries": {
+                "type": "number",
+                "value": 3
+              },
+              "paywall": {
+                "type": "json",
+                "value": {
+                  "cta": "Start trial",
+                  "headline": "Go Pro"
+                }
               }
-            }
+            },
+            "version": 1
           },
-          "version": 1
+          "error": null
         }
       },
       "expect": {

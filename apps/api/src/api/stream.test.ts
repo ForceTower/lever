@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { connectSubscriber, createStreamRegistry, type Subscriber } from "../service/stream";
-import { createTestApp, type TestApp, type TestRequestInit } from "../test-support";
+import { createTestApp, type TestApp, type TestRequestInit, dataOf } from "../test-support";
 
 type Request = TestApp["request"];
 
@@ -8,12 +8,12 @@ const post = (body?: unknown): TestRequestInit =>
   body === undefined ? { method: "POST" } : { method: "POST", body };
 
 async function seed(request: Request) {
-  const project = await (
-    await request("/v1/admin/projects", post({ key: "acme", name: "Acme" }))
-  ).json();
-  const environment = await (
-    await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "prod" }))
-  ).json();
+  const project = await dataOf(
+    await request("/v1/admin/projects", post({ key: "acme", name: "Acme" })),
+  );
+  const environment = await dataOf(
+    await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "prod" })),
+  );
   await request(
     `/v1/admin/environments/${environment.id}/parameters`,
     post({ key: "gate", type: "boolean", defaultValue: false }),
@@ -76,9 +76,9 @@ describe("stream", () => {
     expect(first).toContain('{"version":1}');
     await res.body?.cancel();
 
-    const fresh = await (
-      await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "staging" }))
-    ).json();
+    const fresh = await dataOf(
+      await request(`/v1/admin/projects/${project.id}/environments`, post({ key: "staging" })),
+    );
     const unpublished = await connect(request, fresh.clientKey);
     const [frame] = await readFrames(unpublished.body ?? new ReadableStream(), 1);
     expect(frame).toContain('{"version":0}');
@@ -108,7 +108,7 @@ describe("stream", () => {
 
     await readUntil('{"version":1}');
     await request(
-      `/v1/admin/parameters/${(await (await request(`/v1/admin/environments/${environment.id}/parameters`)).json())[0].id}`,
+      `/v1/admin/parameters/${(await dataOf(await request(`/v1/admin/environments/${environment.id}/parameters`)))[0].id}`,
       { method: "PATCH", body: { defaultValue: true } },
     );
     await request(`/v1/admin/environments/${environment.id}/publish`, post());
@@ -146,7 +146,7 @@ describe("stream", () => {
     await Bun.sleep(10);
     expect(env.streams.count(environment.id)).toBe(0);
 
-    const rotated = await (await request(`/v1/admin/environments/${environment.id}`)).json();
+    const rotated = await dataOf(await request(`/v1/admin/environments/${environment.id}`));
     const second = await connect(request, rotated.clientKey);
     await readFrames(second.body ?? new ReadableStream(), 1);
     expect(env.streams.count(environment.id)).toBe(1);

@@ -1,6 +1,8 @@
 # Spec 0001 — The service
 
-- **Status:** implemented
+- **Status:** implemented, including the 2026-08-14 amendment — the response envelope
+  (§5.1), passkey admin auth (§8.1), and the separately hosted dashboard (§9.4), per
+  research §4.2, §4.5, §4.6.
 - **Research:** [0001 — product scope](../../research/0001-product-scope/research.md)
 - **Scope:** the backend service only — SQLite schema, resolve/stream endpoints, admin
   REST, auth, and the cross-cutting plumbing (research §8). The dashboard and the three
@@ -20,7 +22,7 @@ lever/
   .mise.toml            # pins bun
   apps/
     api/                # this spec — the Bun + Hono service
-    admin/              # dashboard SPA (later spec; served by the api container, §9.4)
+    admin/              # dashboard SPA (later spec; its own deployment, own domain, §9.4)
   packages/
     sdk-ts/             # TypeScript SDK (later spec)
     contract-fixtures/  # shared resolve fixtures (§10.2) — JSON only, no runtime code
@@ -37,18 +39,24 @@ apps/api/
     env.ts              # zod-validated env vars + service registry
     error.ts            # LeverError
     logger.ts           # request-scoped structured logging
+    admin-enroll.ts     # `admin:enroll` CLI — bootstrap and recovery (§8.1.2)
     api/
-      index.ts          # createHono, typed context, error helpers, zValidator wrapper
-      middleware.ts     # clientKeyAuth, adminAuth
+      index.ts          # createHono, typed context, envelope helpers, zValidator wrapper
+      middleware.ts     # clientKeyAuth, adminAuth, requirePermission, adminAudit
       resolve.ts        # GET /v1/resolve
       stream.ts         # GET /v1/stream
-      admin/            # /v1/admin/* route modules (projects, environments,
-                        #   parameters, conditions, versions)
+      admin/            # /v1/admin/* route modules (auth, accounts, projects,
+                        #   environments, parameters, conditions, versions)
+                        #   plus passkey-schemas.ts (§8.1 request validation)
     service/
       evaluate.ts       # pure rule evaluation (snapshot + context → values)
       resolve-cache.ts  # in-process compiled-snapshot cache (§6.4)
       publish.ts        # snapshot build, diff, publish, rollback
       stream.ts         # SSE subscriber registry, broadcast, heartbeat
+      webauthn.ts       # passkey ceremonies over @simplewebauthn/server (§8.1)
+      tokens.ts         # session JWT sign/verify (§8.1.4)
+      permissions.ts    # the §8.1.5 permission vocabulary
+      admin-auth.ts     # accounts, enrollment codes, sessions, grants (§8.1)
       admin/            # CRUD services over the repositories
     db/
       index.ts          # openDb (pragmas), migration runner, createRepos, withTransaction
@@ -61,7 +69,19 @@ apps/api/
 
 Routes bind to services, services depend on repositories, repositories own SQL. Env
 follows the reference idiom: a zod-parsed `envVarsSchema` plus a lazily built, cached
-registry (`getEnv()`) of constructed services, injected into Hono's `Bindings`.
+registry (`getEnv()`) of constructed services, injected into Hono's `Bindings` — so a
+handler reaches its dependencies as `c.env.services.…` rather than through a factory
+argument. Route modules are correspondingly **module-level `Hono` constants**
+(`export const projectRoutes = createHono()`), not functions that take services and
+return a router; `app.ts` installs the registry in one middleware and mounts them.
+That is what keeps `createApp(env)` the only injection point, which is in turn what
+lets every test hold its own `:memory:` database (§10).
+
+One routing rule worth stating, because getting it wrong is silent: a router that
+applies a blanket `use("*", requirePermission(…))` must be mounted under its own path
+prefix. Mounted at `/`, that middleware matches every admin request and gates the whole
+surface on one permission — which is why the identity routes live under `/accounts` and
+`/sessions` rather than declaring absolute paths on a router mounted at the root.
 
 ## 2. Domain model
 
@@ -167,12 +187,13 @@ CREATE TABLE parameter_conditional_values (
 );
 
 CREATE TABLE versions (
-  environment_id TEXT NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
-  version        INTEGER NOT NULL,          -- 1, 2, 3… per environment
-  snapshot       TEXT NOT NULL,             -- canonical JSON (§3.3)
-  author         TEXT NOT NULL,             -- admin token name (§8.1)
-  published_at   INTEGER NOT NULL,
-  rollback_of    INTEGER,                   -- version this republishes, when rollback
+  environment_id    TEXT NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+  version           INTEGER NOT NULL,       -- 1, 2, 3… per environment
+  snapshot          TEXT NOT NULL,          -- canonical JSON (§3.3)
+  author            TEXT NOT NULL,          -- admin username, captured at publish (§8.1)
+  author_account_id TEXT,                   -- no FK: see below
+  published_at      INTEGER NOT NULL,
+  rollback_of       INTEGER,                -- version this republishes, when rollback
   PRIMARY KEY (environment_id, version),
   FOREIGN KEY (environment_id, rollback_of)
     REFERENCES versions(environment_id, version)
@@ -181,6 +202,86 @@ CREATE TABLE versions (
 CREATE INDEX idx_conditions_env ON conditions(environment_id);
 CREATE INDEX idx_parameters_env ON parameters(environment_id);
 ```
+
+`versions.author` stores the **username as a string copied at publish time**, and
+`author_account_id` deliberately carries no foreign key. The version chain is the audit
+log (research §4.1) and is append-only (§8.3): a real FK would force either a cascade
+that rewrites history when an account is deleted, or a RESTRICT that makes deleting a
+departed operator impossible. A copied username keeps attribution readable forever, and
+the id stays a best-effort join back to a live account.
+
+### 3.2.1 Admin identity tables
+
+The passkey account model (§8.1). Separate from the config tables above: nothing in the
+resolve path reads them, and they are the only tables holding anything credential-like.
+
+```sql
+CREATE TABLE admin_accounts (
+  id          TEXT PRIMARY KEY,
+  username    TEXT NOT NULL UNIQUE,        -- [a-z0-9-]{1,32}
+  name        TEXT NOT NULL,               -- display name
+  created_at  INTEGER NOT NULL,
+  disabled_at INTEGER                      -- set → login refused, live sessions die
+);
+
+CREATE TABLE admin_credentials (
+  id           TEXT PRIMARY KEY,           -- base64url WebAuthn credential id
+  account_id   TEXT NOT NULL REFERENCES admin_accounts(id) ON DELETE CASCADE,
+  public_key   BLOB NOT NULL,
+  counter      INTEGER NOT NULL,
+  transports   TEXT NOT NULL,              -- JSON array of hints
+  name         TEXT NOT NULL,              -- operator label: "phone", "laptop"
+  created_at   INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+
+CREATE TABLE admin_enrollments (
+  id          TEXT PRIMARY KEY,
+  account_id  TEXT NOT NULL REFERENCES admin_accounts(id) ON DELETE CASCADE,
+  code_hash   TEXT NOT NULL UNIQUE,        -- sha256 of the single-use enrollment code
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL,
+  consumed_at INTEGER
+);
+
+CREATE TABLE admin_sessions (
+  id         TEXT PRIMARY KEY,             -- UUIDv7; the session token's jti claim
+  account_id TEXT NOT NULL REFERENCES admin_accounts(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  revoked_at INTEGER,
+  ip         TEXT,
+  user_agent TEXT
+);
+
+CREATE TABLE admin_grants (
+  account_id TEXT NOT NULL REFERENCES admin_accounts(id) ON DELETE CASCADE,
+  permission TEXT NOT NULL,                -- §8.1 vocabulary
+  granted_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, permission)
+);
+
+CREATE TABLE admin_audit (
+  id         TEXT PRIMARY KEY,
+  account_id TEXT,                         -- copied, not FK — as with versions.author
+  username   TEXT NOT NULL,
+  session_id TEXT,
+  method     TEXT NOT NULL,
+  path       TEXT NOT NULL,
+  status     INTEGER NOT NULL,
+  body       TEXT,                          -- request JSON, capped (§8.1)
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_admin_credentials_account ON admin_credentials(account_id);
+CREATE INDEX idx_admin_sessions_account ON admin_sessions(account_id);
+CREATE INDEX idx_admin_audit_created ON admin_audit(created_at DESC);
+```
+
+Nothing here is a secret the server could leak into a useful position: a WebAuthn
+public key is public by construction, `admin_sessions` holds no token material at all
+(§8.1.4), and enrollment codes are stored only as hashes. That is the property that
+makes "SQLite file on one host" an acceptable place for an auth store.
 
 `environments.client_key` is stored plaintext — client keys are public identifiers,
 not credentials (research §7), and the dashboard must display them. The `versions`
@@ -201,7 +302,9 @@ rule — not code points; the two differ outside the Basic Multilingual Plane), 
 insignificant whitespace, shortest-form numbers, minimal escaping. No-op publish detection (§8.3)
 and the resolve ETag (§6.4) both hang on byte equality, so the rule is a named spec,
 not a serializer habit: one shared `canonicalize()` produces snapshots *and* resolve
-response bodies, and a contract fixture asserts its exact output bytes (§10.2).
+response **payloads**, and a contract fixture asserts its exact output bytes (§10.2).
+Payload, not body: the §5 envelope wraps the canonical payload and is not itself
+canonicalized, which is what keeps a `message` string out of the ETag input (§6.4).
 
 ```json
 {
@@ -339,25 +442,75 @@ snapshot is validated at publish time, so evaluation may assume it is well-forme
 
 ## 5. Wire conventions
 
-- Success responses return the resource or payload directly — no envelope. The resolve
-  body is exactly the research's `{ values, version }` (§4.2), and wrapping only the
-  admin API would make two dialects.
-- Errors are `{ "error": { "code": "…", "message": "…", "details": … } }` with the
-  matching HTTP status. `code` is a stable machine-readable slug (`not_found`,
-  `invalid_key`, `validation_failed`, `publish_conflict`, `nothing_to_publish`, …).
-  `details` carries zod's treeified issues on validation failures.
-- A `LeverError extends Error { statusCode, code }` thrown anywhere is mapped by
-  `app.onError`; anything else logs and returns a bare 500.
-- All request bodies, query params, and path params are zod-validated via a
-  `zValidator` wrapper that renders failures in the shape above.
-- CORS: `/v1/resolve` and `/v1/stream` answer cross-origin browsers for the origins
-  in `LEVER_ALLOWED_ORIGINS` (default `*` — resolved values are public by design,
-  research §3.4), with `Access-Control-Expose-Headers: ETag`; without that header
-  browsers hide the ETag from cross-origin JS and the 304 path silently degrades to
-  full refetches. `/v1/admin` gets no CORS — the dashboard is served same-origin from
-  this container (§9.4).
-- `GET /healthz` returns `{ "name": "lever", "version": "…" }` for container
-  healthchecks.
+### 5.1 The envelope
+
+Every JSON response body — resolve, admin, `/healthz`, and every error — is the same
+four-member envelope (research §4.2):
+
+```json
+{ "ok": true,  "message": "Resolved 4 parameters", "data": { "…": "…" }, "error": null }
+{ "ok": false, "message": "Unknown client key",    "data": null, "error": { "code": "invalid_key" } }
+```
+
+- `ok` mirrors `status < 400`; it is redundant with the HTTP status **on purpose**,
+  because the one client that matters most (an SDK behind a transport it does not own)
+  should not have to trust an intermediary's status rewriting to know what it holds.
+- `message` is human-facing and **not a contract**: it is for logs, curl, and dashboard
+  toasts. Nothing may branch on it, no fixture asserts it, and no cache validator is
+  derived from it (§6.4).
+- `data` carries the payload and is `null` on failure. The resolve payload is exactly
+  the research's `{ values, version }` (§6.3), now one level down.
+- `error` is `null` on success and otherwise `{ code, details? }`. `code` is the stable
+  machine-readable slug clients branch on (`not_found`, `invalid_key`,
+  `validation_failed`, `publish_conflict`, `nothing_to_publish`, `unauthorized`,
+  `forbidden`, …); `details` carries zod's treeified issues on validation failures.
+
+The code lives in `error.code` rather than beside `message` at the top level: an error
+is one object a client can pass around whole, and success bodies keep a `null` there
+instead of an absent member, so the envelope has exactly four keys in every response.
+
+Two deliberate exemptions, both because they are not JSON response bodies:
+
+- **`304 Not Modified`** has no body at all (§6.4) — an envelope on a 304 would violate
+  HTTP and defeat the point of the validator.
+- **SSE frames** (§7) are event data, not responses: `data: {"version":42}` stays
+  exactly as it is. Wrapping a nudge would put a `message` string on the hot push path
+  and force every SDK to unwrap a frame whose entire content is one integer.
+
+### 5.2 Errors and validation
+
+- A `LeverError extends Error { statusCode, code, details? }` thrown anywhere is mapped
+  by `app.onError` into the §5.1 failure envelope; anything else logs and returns a 500
+  whose `message` is generic and whose `code` is `internal_error`.
+- All request bodies, query params, and path params are zod-validated via a `zValidator`
+  wrapper that renders failures as `400 validation_failed` with treeified issues in
+  `error.details`.
+
+### 5.3 CORS
+
+The dashboard now runs on its own origin (§9.4), so **both** surfaces answer
+cross-origin browsers — with different allowlists, because they are different trust
+tiers:
+
+- **Read surface** (`/v1/resolve`, `/v1/stream`): origins from `LEVER_ALLOWED_ORIGINS`,
+  default `*` — resolved values are public by design (research §3.4). Sends
+  `Access-Control-Expose-Headers: ETag`; without it browsers hide the ETag from
+  cross-origin JS and the 304 path silently degrades to full refetches.
+- **Admin surface** (`/v1/admin`): origins from `LEVER_ADMIN_ORIGINS`, which has **no
+  default and rejects `*`** at boot (§9.1). An authenticated surface that echoes any
+  origin is how a hostile page reaches an operator's session, and a required var makes
+  the operator name their portal rather than inherit a permissive default. Allowed
+  headers are `Authorization` and `Content-Type`; allowed methods `GET`, `POST`,
+  `PATCH`, `PUT`, `DELETE`, `OPTIONS`; preflights cached 24 h.
+
+`Access-Control-Allow-Credentials` is **not** set on either surface, and cannot be
+needed: the admin session travels as a bearer token in `Authorization`, never a cookie
+(§8.1). No cookie means no cross-site cookie semantics and no CSRF surface — a
+cross-origin page can send a request but has no way to make the browser attach the
+operator's credential to it.
+
+`GET /healthz` returns `data: { "name": "lever", "version": "…" }` for container
+healthchecks, which only read the status code.
 
 ## 6. `GET /v1/resolve`
 
@@ -367,7 +520,7 @@ The hot path (research §4.2).
 
 The environment's client key, sent as `Authorization: Bearer pk_…` or, as a fallback
 for `EventSource`-style clients that cannot set headers, `?key=pk_…` (shared with
-§7). An unknown key is `401 { code: "invalid_key" }`. Client keys authorize exactly
+§7). An unknown key is a `401` whose `error.code` is `invalid_key`. Client keys authorize exactly
 this read surface — resolve and stream for one environment (research §7).
 
 ### 6.2 Request
@@ -387,24 +540,38 @@ parameter to its default (§4).
 
 ```json
 {
-  "version": 42,
-  "values": {
-    "enable_enrollment": { "type": "boolean", "value": true },
-    "captcha_site_key":  { "type": "string",  "value": "…" }
-  }
+  "ok": true,
+  "message": "Resolved 2 parameters",
+  "data": {
+    "version": 42,
+    "values": {
+      "enable_enrollment": { "type": "boolean", "value": true },
+      "captcha_site_key":  { "type": "string",  "value": "…" }
+    }
+  },
+  "error": null
 }
 ```
 
-Values carry their declared types so SDK getters can be strict without a schema
-exchange (research §4.2). An environment with no published version resolves as
-`{ "version": 0, "values": {} }` — the SDK's code-default floor covers it (research
+`data` is the canonical payload (§3.3) — the envelope around it is not canonicalized
+(§5.1). Values carry their declared types so SDK getters can be strict without a schema
+exchange (research §4.2). An environment with no published version resolves with `data`
+of `{ "version": 0, "values": {} }` — the SDK's code-default floor covers it (research
 §4.4).
+
+SDKs decode the envelope first and treat a malformed or `ok: false` body as a fetch
+failure, falling back to the previous snapshot (research §4.4) — never as an empty
+`values` map, which would silently resolve every key to its code default while the
+server was in fact reachable and healthy.
 
 ### 6.4 ETag and the in-process cache
 
 - **ETag** is a strong validator: `"<sha256 hex, first 16 chars>"` over the exact
-  canonical response body (which already includes the version, so a publish always
-  changes the ETag even if resolved values happen to coincide for this context).
+  canonical response **payload** — the `data` member, not the envelope (§5.1), so the
+  validator is a function of resolved config alone and no wording change to `message`
+  can ever invalidate a client's cache. The payload already includes the version, so a
+  publish always changes the ETag even if resolved values happen to coincide for this
+  context.
   `If-None-Match` containing the current ETag (any member of the list) returns `304`
   with the `ETag` header and no body. `Cache-Control: private, no-cache` — clients
   always revalidate; the 304 is the cheap common case (research §3.1).
@@ -422,7 +589,9 @@ exchange (research §4.2). An environment with no published version resolves as
 
 ## 7. `GET /v1/stream`
 
-SSE nudges (research §3.2, §4.3). Same client-key auth as §6.1.
+SSE nudges (research §3.2, §4.3). Same client-key auth as §6.1. Event frames are exempt
+from the §5.1 envelope — they are event data, not response bodies; only the errors that
+refuse a connection (401, 503) carry it, since those are ordinary JSON responses.
 
 - **On connect**: register the subscriber in the registry **first**, then read and
   emit the current published version — `event: version` / `data: {"version":42}`
@@ -472,43 +641,212 @@ SSE nudges (research §3.2, §4.3). Same client-key auth as §6.1.
 
 REST first; the dashboard is a client of this API (research §4.5).
 
-### 8.1 Auth
+### 8.1 Auth — passkey accounts
 
-`LEVER_ADMIN_TOKENS` env var: comma-separated `name:secret` pairs. Names are
-`[a-z0-9-]{1,32}` and unique; secrets are `[A-Za-z0-9]{32,}` — the charsets make the
-`,`/`:` delimiters unambiguous without an escaping scheme, and the parse (part of the
-§9.1 boot validation) refuses to start on a malformed or duplicate entry rather than
-leaving a token silently unreachable. Requests send `Authorization: Bearer <secret>`;
-comparison is constant-time; failures log at warn. The matched name becomes
-`versions.author` on publish. There is no login throttle: with a ≥ 190-bit enforced
-secret floor, online guessing is not a realistic path, and per-IP throttling behind a
-tunnel buys proxy-attribution complexity for nothing. The dashboard prompts for a
-token once and keeps it in browser storage on the operator's own device — no
-server-side session state.
+Admin auth is a WebAuthn login against an account row, yielding a revocable server-side
+session (research §4.5). `@simplewebauthn/server` does the cryptography; §3.2.1 holds
+the tables. Client keys can never reach `/v1/admin` — they are not in any of them.
 
-Why this and nothing more: lever is self-hosted by its operator (research §1) — a user
-table, password reset, and session machinery would be the largest subsystem in the
-service, serving one or two humans. Static named tokens live in a password manager,
-rotate by editing the env and restarting, and still give the version chain real
-attribution. All writes require admin auth; client keys can never reach `/v1/admin`
-(research §4.5, §7).
+#### 8.1.1 Relying party
+
+WebAuthn credentials are bound to the **dashboard's** domain, not the API's, because the
+dashboard is what the browser has loaded (§9.4):
+
+- `LEVER_WEBAUTHN_RP_ID` — the portal's registrable domain (`lever.example.dev`).
+- `LEVER_WEBAUTHN_ORIGINS` — comma-separated origins accepted as `expectedOrigin`
+  (the portal, plus a localhost origin in development).
+- `LEVER_WEBAUTHN_RP_NAME` — display name in the platform prompt; defaults to `Lever`.
+
+This is the one piece of configuration where getting it wrong is unrecoverable rather
+than merely broken: credentials registered under one RP id are unusable under another,
+so **moving the portal to a new domain invalidates every passkey** and requires the
+offline enrollment path (§8.1.2). Boot validation rejects an `LEVER_WEBAUTHN_RP_ID` that
+is not a suffix of every configured origin's host, which catches the common
+misconfiguration — pointing the RP id at the API's domain — at startup instead of at the
+first login attempt.
+
+#### 8.1.2 Enrollment
+
+Credentials are created by redeeming a single-use **enrollment code**: 32 base62 chars,
+displayed once, stored only as a SHA-256 hash, expiring in 15 minutes
+(`admin_enrollments`). Three producers, one redemption path:
+
+- `bun run --cwd apps/api admin:enroll <username> [--name "…"]` — a CLI against the
+  database file. It creates the account if absent, granting it the full permission set,
+  and prints a code; run against an existing username it just mints another code. This
+  is both the **bootstrap** — the answer to "there are no admins yet, so nobody can
+  authorize one" — and the **recovery** path research §7 requires for the day every
+  credential is lost. It works with the service running or stopped, does not go through
+  `getEnv()` (recovery must not depend on the WebAuthn variables being right, which is
+  exactly what may be broken when it is needed), and takes no auth: filesystem access to
+  the database *is* the authorization, since anything it refused could be done with
+  `sqlite3` and one `UPDATE`.
+- `POST /accounts` — creating an account mints its first code.
+- `POST /accounts/:id/enrollments` — mints another, for a second device. Registering a
+  spare credential is the expected steady state, not an edge case.
+
+Redemption is `POST /auth/register/options` (body `{ code }`) then
+`POST /auth/register/verify` (body `{ code, credentialName, response }`), which stores
+the credential, marks the code consumed, and returns a session (§8.1.4) so enrollment
+does not end with an immediate second prompt. `excludeCredentials` lists the account's
+existing credentials so the same authenticator cannot be registered twice. Codes are
+never written to the audit log (§8.1.6).
+
+#### 8.1.3 Login ceremony
+
+- `POST /auth/login/options` — body `{ username? }`. Returns authentication options with
+  `userVerification: "required"`; the challenge is held in process with a 5-minute TTL,
+  single-use, tagged `login` so it can never be replayed into a registration. When a
+  `username` is supplied and known, `allowCredentials` lists its credentials. **The
+  response is identical in shape and status whether or not the username exists** — this
+  endpoint is pre-assertion and must not become an oracle for who holds admin access.
+- `POST /auth/login/verify` — body `{ challengeId, response }`. Verifies the assertion,
+  bumps the stored signature counter and `last_used_at`, and issues a session.
+
+Every failure — unknown credential, bad assertion, disabled account, an account with
+zero grants — returns the same `401` with `error.code: "unauthorized"` and a fixed
+message. Distinguishing them would leak exactly what the generic response protects.
+
+There is no login throttle. A WebAuthn assertion cannot be guessed at all, and an
+enrollment code is ~190 bits behind a 15-minute single-use window; per-IP throttling
+behind a tunnel would buy proxy-attribution complexity for nothing. Failures log at
+`warn`.
+
+#### 8.1.4 Sessions
+
+A session is a **signed JWT** (HS256) whose `sub` is the account and whose `jti`
+is the id of a row in `admin_sessions`. Requests send `Authorization: Bearer <jwt>`.
+Claims are pinned to an issuer and an admin audience, so a token minted for anything
+else fails verification rather than being merely ignored.
+
+The signature and the row do different jobs, and both are checked on every request.
+The signature makes the token self-describing and cheap to reject when it is
+forged, expired, or foreign. The row is what makes revocation **instant**: logout,
+a disabled account, or an admin closing someone's device all take effect on the
+next request, which a signature-only design cannot do without waiting out the
+expiry. No token material is stored — the row holds no secret, so a database read
+cannot yield a usable credential.
+
+`LEVER_JWT_SECRET` (§9.1) signs them. HS256 over one secret rather than an
+asymmetric keypair: lever issues and verifies inside the same process, so a public
+key has no second consumer to serve, and a JWK is one more thing for a self-hoster
+to generate, rotate, and mis-paste. Rotating the secret invalidates every live
+session, which is the intended break-glass behaviour. The algorithm choice is
+contained in `service/tokens.ts`.
+
+Per request, `adminAuth` verifies the token, loads the session by its `jti`, and
+refuses with the generic `401` unless the row is unexpired and unrevoked, its
+account id matches the token's `sub`, that account exists and is not disabled, and
+it resolves to **at least one grant**. Grants are read live, never carried as a
+claim, so a revoked permission applies on the next request with no re-login — and
+an account stripped of every grant is no longer an admin.
+
+Expiry is `LEVER_ADMIN_SESSION_HOURS` (default 8) from issue, and does **not**
+slide: re-authenticating is a biometric prompt, cheap enough that extending a
+session on activity is not worth the weaker bound. `POST /auth/logout` revokes the
+calling session; `DELETE /sessions/:id` revokes another; disabling or deleting an
+account kills all of its sessions. Rows past expiry are swept at boot after 30
+days, staying joinable from audit rows in the meantime.
+
+`GET /auth/session` returns the current account, its live grants, and the session
+expiry — what the portal calls on load to decide between the dashboard and the
+login screen.
+
+#### 8.1.5 Permissions
+
+Five slugs, gated per route by a `requirePermission` middleware:
+
+| Permission | Covers |
+| --- | --- |
+| `config:read` | every `GET` on the config surface (§8.2, §8.5) |
+| `config:write` | draft edits: parameters, conditions, conditional values, project/environment create and rename |
+| `config:publish` | publish and rollback (§8.3, §8.4) |
+| `config:admin` | project/environment `DELETE` and client-key rotation |
+| `accounts:manage` | the §8.1 identity surface: accounts, enrollments, grants, sessions |
+
+The split follows blast radius, not CRUD shape. `config:write` only ever changes a draft
+nobody is serving (§3.1); `config:publish` changes what every client resolves;
+`config:admin` covers the two acts that break live clients or destroy an audit log —
+deleting an environment and rotating its key. `accounts:manage` is separate because it
+is the permission that can grant permissions.
+
+`POST /accounts/:id/grants` replaces an account's grant set wholesale, for the same
+reason conditional values are written as a list (§8.2): a partial grant edit invites a
+half-applied permission change. An account may not remove its own `accounts:manage`
+grant, and the last account holding it may not be deleted or disabled — the check runs
+inside the same transaction as the write, so two concurrent requests cannot strip the
+last one between them. Locking every operator out of their own config service is a
+mistake the API declines to help with.
+
+#### 8.1.6 Audit
+
+`adminAudit` middleware records every non-`GET` request under `/v1/admin` to
+`admin_audit` after the handler runs: account id and username (copied, per §3.2), session
+id, method, path, response status, and the JSON request body when it is
+`application/json` and under 16 KB. Write failures log and never fail the request —
+availability over completeness, and the request logger keeps the trace either way.
+
+Bodies under `/v1/admin/auth/*` and `/accounts/:id/enrollments` are recorded as `null`:
+those carry enrollment codes and WebAuthn material, and an audit log that captures
+credentials is a liability rather than a record. Method, path, and status are still
+recorded, so "someone enrolled a credential at 03:12" remains visible.
+
+The version chain already audits config *content* (research §4.1); this table covers
+what the chain cannot see — failed writes, deletions, key rotations, and every change to
+who can do any of it.
+
+#### 8.1.7 Why this shape
+
+The previous design was a list of static `name:secret` tokens in an env var, justified
+by "a user table and session machinery would be the largest subsystem in the service,
+serving one or two humans." Two things overturned it. The dashboard moved to its own
+domain (§9.4), so that shared secret would have to be pasted into a browser on an origin
+the API does not control and kept there indefinitely — a long-lived bearer credential in
+the worst possible place. And passkeys make the account model cheap in exactly the
+dimension that argument was about: no password hashing, no reset flow, no email
+delivery, no credential-strength policy. What remains is four small tables and one
+middleware, and it buys revocation without a restart, per-operator attribution that
+survives a shared password manager, and a phishing-resistant login on the phone where
+the incident-time gate flip actually happens (research §4.5).
 
 ### 8.2 CRUD routes
 
-Standard shapes, all zod-validated, all returning the §5 conventions:
+Standard shapes, all zod-validated, all returning the §5 conventions, all behind
+`adminAuth` (§8.1.4) and the permission named per method:
 
-| Route | Methods |
-| --- | --- |
-| `/projects` | `GET` list, `POST` create |
-| `/projects/:projectId` | `GET`, `PATCH` (name), `DELETE` |
-| `/projects/:projectId/environments` | `GET`, `POST` (key; client key generated server-side) |
-| `/environments/:envId` | `GET` (incl. client key, latest version, dirty flag), `DELETE` |
-| `/environments/:envId/rotate-key` | `POST` — new `pk_…`, old key invalid immediately |
-| `/environments/:envId/conditions` | `GET`, `POST` (name + clauses) |
-| `/conditions/:conditionId` | `PATCH`, `DELETE` (409 while referenced — §3.2 RESTRICT) |
-| `/environments/:envId/parameters` | `GET`, `POST` (key, type, defaultValue, description) |
-| `/parameters/:parameterId` | `GET`, `PATCH`, `DELETE` |
-| `/parameters/:parameterId/conditional-values` | `PUT` — replaces the full ordered list `[{conditionId, value}]` |
+| Route | Methods | Permission |
+| --- | --- | --- |
+| `/projects` | `GET` list, `POST` create | read / write |
+| `/projects/:projectId` | `GET`, `PATCH` (name), `DELETE` | read / write / **admin** |
+| `/projects/:projectId/environments` | `GET`, `POST` (key; client key generated server-side) | read / write |
+| `/environments/:envId` | `GET` (incl. client key, latest version, dirty flag), `DELETE` | read / **admin** |
+| `/environments/:envId/rotate-key` | `POST` — new `pk_…`, old key invalid immediately | **admin** |
+| `/environments/:envId/conditions` | `GET`, `POST` (name + clauses) | read / write |
+| `/conditions/:conditionId` | `PATCH`, `DELETE` (409 while referenced — §3.2 RESTRICT) | write |
+| `/environments/:envId/parameters` | `GET`, `POST` (key, type, defaultValue, description) | read / write |
+| `/parameters/:parameterId` | `GET`, `PATCH`, `DELETE` | read / write |
+| `/parameters/:parameterId/conditional-values` | `PUT` — replaces the full ordered list `[{conditionId, value}]` | write |
+
+The identity surface (§8.1), on the same conventions. Only `/auth/*` is unauthenticated
+— it is how a session is obtained in the first place:
+
+| Route | Methods | Permission |
+| --- | --- | --- |
+| `/auth/register/options`, `/auth/register/verify` | `POST` | — (enrollment code) |
+| `/auth/login/options`, `/auth/login/verify` | `POST` | — |
+| `/auth/session` | `GET` — current account, grants, expiry | any grant |
+| `/auth/logout` | `POST` — revokes the calling session | any grant |
+| `/accounts` | `GET`, `POST` (creates the account and its first enrollment code) | `accounts:manage` |
+| `/accounts/:id` | `GET`, `PATCH` (name, disabled), `DELETE` | `accounts:manage` |
+| `/accounts/:id/enrollments` | `POST` — mint a code for another credential | `accounts:manage` |
+| `/accounts/:id/credentials` | `GET`, and `DELETE /credentials/:credId` | `accounts:manage` |
+| `/accounts/:id/grants` | `PUT` — replaces the grant set (§8.1.5) | `accounts:manage` |
+| `/accounts/:id/sessions` | `GET`, and `DELETE /sessions/:sessionId` | `accounts:manage` |
+
+Successful `DELETE`s answer `200` with `data: null` rather than `204`. A bare 204 has
+no body, and the §5.1 envelope is the whole point of having one dialect — a client
+that unwraps every response should not need a special case for the one verb that
+returns nothing.
 
 Conditional values are written as a whole ordered list rather than item-by-item:
 ordering is first-match-wins semantics (§4), so partial reorders are a footgun the API
@@ -542,7 +880,8 @@ publish (§3.1).
   build + canonicalize the snapshot, reject `409 publish_conflict` if
   `expectedVersion` was given and no longer matches the latest (two dashboards racing),
   reject `409 nothing_to_publish` if the snapshot is byte-identical to the latest,
-  insert version `N+1` with author and timestamp. A busy error or versions-PK
+  insert version `N+1` with the timestamp and the authenticated account's username and
+  id as `author` / `author_account_id` (§3.2). A busy error or versions-PK
   collision from a concurrent publish also maps to `409 publish_conflict`, never a
   500. After commit: swap the resolve-cache entry, then broadcast the SSE nudge.
   Returns the new version with its diff.
@@ -588,13 +927,30 @@ const envVarsSchema = z.object({
   NODE_ENV: z.enum(["development", "production"]).default("development"),
   PORT: z.coerce.number().default(3000),
   DATABASE_PATH: z.string().default("./data/lever.db"),
-  LEVER_ADMIN_TOKENS: z.string().transform(parseAdminTokens), // "name:secret,…" (§8.1)
-  LEVER_ALLOWED_ORIGINS: z.string().default("*"),             // CORS for /v1 reads (§5)
+  LEVER_ALLOWED_ORIGINS: z.string().default("*"),      // CORS for /v1 reads (§5.3)
+  LEVER_ADMIN_ORIGINS: z.string(),                     // CORS for /v1/admin — required, no "*"
+  LEVER_WEBAUTHN_RP_ID: z.string(),                    // the portal's domain (§8.1.1)
+  LEVER_WEBAUTHN_ORIGINS: z.string(),                  // accepted assertion origins
+  LEVER_WEBAUTHN_RP_NAME: z.string().default("Lever"),
+  LEVER_ADMIN_SESSION_HOURS: z.coerce.number().positive().default(8),
+  LEVER_JWT_SECRET: z.string().min(32),                // signs session JWTs (§8.1.4)
   SSE_HEARTBEAT_MS: z.coerce.number().default(25_000),
   SSE_MAX_SUBSCRIBERS: z.coerce.number().default(2_000),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 ```
+
+Five of these are required with no default, and that is the point: each names a domain
+or a secret the operator alone knows, and every plausible default is wrong in a way
+that fails late. `LEVER_ADMIN_ORIGINS` additionally **rejects `*`** (§5.3), origin
+lists must be bare `scheme://host[:port]` values, and `LEVER_WEBAUTHN_RP_ID` is
+cross-checked as a suffix of every `LEVER_WEBAUTHN_ORIGINS` host (§8.1.1) — each
+refuses to boot rather than starting a service whose auth is quietly wrong.
+
+`LEVER_ADMIN_TOKENS` is **gone**, along with its parser. Any deployment still setting it
+is running the old auth model, so boot fails with a message pointing at
+`bun run admin:enroll` (§8.1.2) rather than silently ignoring it and leaving the
+operator with no way in.
 
 `getEnv()` builds and caches the registry: parsed vars, the opened database,
 repositories, and constructed services — the composition root, per the reference
@@ -611,7 +967,8 @@ observability story; the seam to add a transport later is `logger.ts`.
 
 ### 9.3 Migrations
 
-Numbered TypeScript modules in `src/db/migrations/` (`0001-init.ts`, …), each
+Numbered TypeScript modules in `src/db/migrations/` (`0001-init.ts` for §3.2,
+`0002-admin-identity.ts` for §3.2.1, …), each
 exporting `up(db)` running raw SQL; applied in filename order inside a transaction and
 recorded in a `migrations` table. They run **automatically at boot** before the server
 listens — single-node SQLite has no coordination problem, and a container that starts
@@ -625,11 +982,16 @@ checkpointer. A `bun run migrate` script exists for running them against a copy.
 One image (research §4.6), mirroring the reference multi-stage shape: `oven/bun` deps
 stage (`bun install --frozen-lockfile --production`) → slim runtime stage running
 `bun run src/index.ts` as the non-root `bun` user. `DATABASE_PATH` points into a
-mounted volume (`/data`); `HEALTHCHECK` hits `/healthz`. The image also serves
-`apps/admin`'s built static SPA from the same Hono app (research §4.6) — the static
-route is wired in this spec (a no-op empty directory until the dashboard spec lands).
-Deployment examples stay generic (a volume, a port, a tunnel in front); no personal
-infrastructure specifics.
+mounted volume (`/data`); `HEALTHCHECK` hits `/healthz`. Deployment examples stay
+generic (a volume, a port, a tunnel in front); no personal infrastructure specifics.
+
+The image serves **the API only**. `apps/admin` is a static SPA with its own build and
+its own deployment at its own domain (research §4.6) — any static host will do, and its
+spec picks one. Nothing in this container references `apps/admin`, and the two ship
+independently: a dashboard release does not restart the service every project depends
+on. What couples them is configuration, not packaging — the portal's origin appears here
+as `LEVER_ADMIN_ORIGINS` and `LEVER_WEBAUTHN_ORIGINS`, and its domain as
+`LEVER_WEBAUTHN_RP_ID` (§9.1). The portal, in turn, is built against the API's base URL.
 
 The service is **single-process by design**: the resolve cache (§6.4) and the SSE
 registry (§7) live in process memory, so a second replica would serve stale snapshots
@@ -663,8 +1025,11 @@ are **generated from these fixtures**, and the same files later drive the TypeSc
 Kotlin, and Swift SDK test suites — same inputs, same resolved values, one definition
 of correct. Fixtures are data-only so every language can consume them verbatim. Server
 behavior fixtures (ETag stability, 304, empty-context defaults) live alongside as HTTP
-cases keyed by canonical response bodies, including a canonicalization case that pins
-`canonicalize()`'s exact output bytes (§3.3).
+cases keyed by canonical response **payloads**, including a canonicalization case that
+pins `canonicalize()`'s exact output bytes (§3.3). The recorded `response.body` is the
+full §5.1 envelope an SDK actually receives, captured verbatim: resolve's `message` is a
+single constant, so a faithful recording needs no normalization step. It remains
+non-contractual — SDKs decode and ignore it (spec 0002), and no replay may assert it.
 
 ### 10.3 Integration coverage (minimum bar)
 
@@ -687,8 +1052,30 @@ cases keyed by canonical response bodies, including a canonicalization case that
   version; a publish interleaved between registration and the connect emission is not
   lost (§7 ordering); environment delete and key rotation close the stream;
   disconnect removes the subscriber (registry observably empty).
-- **Auth**: client key cannot reach `/v1/admin`; wrong/rotated key → 401 on resolve
-  and stream; bad admin token → 401.
+- **Client-key auth**: a client key cannot reach `/v1/admin`; wrong/rotated key → 401
+  on resolve and stream.
+- **Admin auth**: a full ceremony over a WebAuthn double — enroll with a code, log in,
+  call an admin route; the code is single-use and expires; a login challenge cannot be
+  replayed as a registration challenge; `/auth/login/options` answers identically for a
+  known and an unknown username (§8.1.3); every failure mode returns the same generic
+  401 body.
+- **Sessions**: an expired, revoked, or unknown token → 401; logout revokes exactly the
+  calling session; disabling an account kills its live sessions on the next request; a
+  grant revoked mid-session takes effect on the next request with no re-login.
+- **Permissions**: each route rejects the permission one level below it (a `config:write`
+  holder gets 403 on publish, a `config:publish` holder gets 403 on key rotation); an
+  account cannot drop its own `accounts:manage`, and the last holder cannot be deleted
+  or disabled, including under two concurrent requests.
+- **Audit**: a mutating admin request writes exactly one row with the account, path, and
+  response status; a failed (4xx) write is recorded too; `/auth/*` and enrollment bodies
+  are stored as `null` (§8.1.6); an audit write failure does not fail the request.
+- **Envelope**: every JSON response on both surfaces has exactly the four §5.1 members;
+  a 304 has an empty body; SSE frames are unwrapped; the resolve ETag is unchanged by a
+  differing `message`.
+- **CORS**: a `/v1/admin` preflight from a listed origin succeeds and from an unlisted
+  one does not; no response on either surface sets
+  `Access-Control-Allow-Credentials`; boot refuses `LEVER_ADMIN_ORIGINS=*` and an
+  RP id that does not match the configured origins (§8.1.1).
 
 ## 11. Open questions
 
@@ -703,3 +1090,16 @@ cases keyed by canonical response bodies, including a canonicalization case that
   broken app, so v1 keeps the simple rule.
 - **Version retention.** Versions are kept forever — at this scale they are tiny and
   they *are* the audit log. Revisit only if a pathological publisher appears.
+- **Audit retention.** `admin_audit` grows without bound and, unlike versions, is not
+  content-addressed — a busy dashboard session writes a row per click. No pruning in
+  v1; the first real growth measurement decides between a retention window and leaving
+  it alone.
+- **Portal domain migration.** Changing `LEVER_WEBAUTHN_RP_ID` invalidates every
+  credential (§8.1.1). The offline `admin:enroll` path makes it survivable but manual.
+  Whether to support a second accepted RP id for a cutover window is deferred until a
+  move is actually on the table.
+- **Machine access to `/v1/admin`.** Passkeys are a human ceremony; a CI job that wants
+  to publish has no path today beyond driving a session by hand. Scoped, non-expiring
+  service tokens issued *by* an account (and revocable per §8.1.4) are the obvious
+  shape, but no consumer needs one yet — and adding them before there is a consumer
+  would recreate the static-secret model this spec just retired.

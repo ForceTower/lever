@@ -11,6 +11,8 @@ export interface Version {
   version: number;
   snapshot: string;
   author: string;
+  /** Best-effort join back to a live account; `author` is the durable record (§3.2). */
+  authorAccountId: string | null;
   publishedAt: number;
   rollbackOf: number | null;
 }
@@ -25,6 +27,7 @@ export interface VersionRepo {
     version: number;
     snapshot: string;
     author: string;
+    authorAccountId?: string | undefined;
     rollbackOf?: number | undefined;
   }): Promise<Version>;
   get(environmentId: string, version: number): Promise<Version | undefined>;
@@ -41,6 +44,7 @@ function toVersion(row: VersionsTable): Version {
     version: row.version,
     snapshot: row.snapshot,
     author: row.author,
+    authorAccountId: row.author_account_id,
     publishedAt: row.published_at,
     rollbackOf: row.rollback_of,
   };
@@ -48,12 +52,13 @@ function toVersion(row: VersionsTable): Version {
 
 export function createVersionRepo(db: Db): VersionRepo {
   return {
-    async insert({ environmentId, version, snapshot, author, rollbackOf }) {
+    async insert({ environmentId, version, snapshot, author, authorAccountId, rollbackOf }) {
       const row: Version = {
         environmentId,
         version,
         snapshot,
         author,
+        authorAccountId: authorAccountId ?? null,
         publishedAt: Date.now(),
         rollbackOf: rollbackOf ?? null,
       };
@@ -64,6 +69,7 @@ export function createVersionRepo(db: Db): VersionRepo {
           version: row.version,
           snapshot: row.snapshot,
           author: row.author,
+          author_account_id: row.authorAccountId,
           published_at: row.publishedAt,
           rollback_of: row.rollbackOf,
         })

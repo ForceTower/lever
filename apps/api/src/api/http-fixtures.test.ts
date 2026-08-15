@@ -13,7 +13,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { clausesSchema, jsonValueSchema, parameterTypeSchema } from "../service/snapshot";
-import { createTestApp, type TestApp } from "../test-support";
+import { createTestApp, dataOf, type TestApp } from "../test-support";
 
 const UPDATE = Bun.env.LEVER_UPDATE_FIXTURES === "1";
 
@@ -123,7 +123,7 @@ async function seed(app: TestApp, setup: Fixture["setup"]): Promise<Seeded> {
   const json = async (response: Promise<Response>) => {
     const resolved = await response;
     expect(resolved.status).toBeLessThan(300);
-    return resolved.json();
+    return dataOf(resolved);
   };
 
   const project = await json(post("/v1/admin/projects", { key: "acme", name: "Acme" }));

@@ -1,6 +1,7 @@
 # 0001 — Lever: self-hosted remote config for every project
 
-- **Status:** pre-implementation (scope settled 2026-07-27)
+- **Status:** pre-implementation (scope settled 2026-07-27; §4.2, §4.5, §4.6 amended
+  2026-08-14 — separately hosted dashboard, passkey admin auth, one response envelope)
 - **Date started:** 2026-07-27
 - **Scope:** the whole product — the config service, the client SDKs (Kotlin, Swift,
   TypeScript), and a minimal admin dashboard.
@@ -122,6 +123,14 @@ query parameters. Response: fully resolved `{ values, version }` plus an `ETag`;
 `If-None-Match` returns `304`. Values carry their declared types so SDK getters can be
 strict (a type mismatch falls back to the code default and warns, never throws).
 
+Every JSON response in the service — resolve and admin alike — is wrapped in one
+envelope (`{ ok, message, data, error }`), so the resolved payload above arrives under
+`data`. One dialect across both surfaces means an SDK, the dashboard, and a curl session
+all read success and failure the same way, and a client that has decoded the envelope
+has already branched on the outcome before it looks at anything type-specific. The
+`ETag` validates the **payload**, not the envelope: a human-facing `message` must never
+be able to invalidate a cache entry.
+
 ### 4.3 The stream endpoint
 
 `GET /v1/stream`, same client-key auth. Emits the current version on connect (catching
@@ -163,18 +172,52 @@ polish: the primary real-world interaction is "flip a gate from wherever you are
 an incident." Client keys are public identifiers scoped to reads of one environment;
 all writes require admin auth.
 
+**Admin auth is a passkey login against a real account.** An operator registers a
+WebAuthn credential and, from then on, authenticates with a biometric prompt; the server
+mints a short-lived session backed by a row it can revoke, and resolves that account's
+permission grants live on every request. The alternative considered and rejected was a
+static shared secret in an env var: it is a long-lived bearer credential that has to be
+pasted into a browser on a domain the API does not control (§4.6), it cannot be revoked
+without a restart, and "which operator published this" degrades to "whoever holds the
+string." A passkey is phishing-resistant, is never transmitted, and needs no password
+reset flow — which is what makes a real account model affordable at this scale rather
+than the sprawling subsystem a username/password stack would be.
+
+The primary interaction — flipping a gate from a phone mid-incident — is what settles
+it. That is exactly the moment a platform-native biometric prompt beats retrieving a
+32-character secret from a password manager on a phone keyboard.
+
+Consequences worth naming up front: sessions are server state, so the "no server-side
+session machinery" simplification is gone; and account recovery has no password escape
+hatch, so enrollment must be able to mint a second credential (§7).
+
 ### 4.6 Stack
 
 Bun + Hono service, `bun:sqlite` behind the repository seam, one Docker image, deployed
-on a single-node host fronted by Cloudflare Tunnel. The dashboard is a static SPA
-served by the same container.
+on a single-node host fronted by Cloudflare Tunnel.
+
+**The dashboard is a static SPA deployed separately, at its own domain** — not served by
+the API container. It is a pure client of the REST API (§4.5), so it has no reason to
+share a process with it: a static host serves it from an edge for free, deploying a
+dashboard fix stops meaning restarting the config service every project depends on, and
+the two move on independent release cadences. The API image gets smaller and has one
+job.
+
+The price is that the browser now talks cross-origin, which makes three things explicit
+that same-origin hosting had hidden: `/v1/admin` needs a CORS allowlist naming the
+portal's origin (the public read surface already had one); the session token travels in
+an `Authorization` header rather than a cookie, which sidesteps cross-site cookie and
+CSRF handling entirely; and the WebAuthn credential is bound to the **portal's** domain,
+not the API's, so the API verifies assertions against a configured relying-party id it
+does not itself serve. That last one is the sharp edge — moving the portal to a new
+domain invalidates every registered passkey.
 
 ## 5. The cut
 
 **MVP:** the service (projects, environments, typed parameters, platform/appVersion/
 custom-attr conditions, immutable publish + rollback), resolve with ETag, SSE nudges,
-admin REST + minimal dashboard, per-env client keys + admin auth, and the three SDKs
-with the §4.4 contract.
+admin REST + minimal dashboard, per-env client keys + passkey admin accounts, and the
+three SDKs with the §4.4 contract.
 
 **v1.x:** percentage rollouts (stable hash over the client id → sticky bucketing, no
 server state), a codegen CLI (`lever pull --kotlin`) emitting typed wrapper classes,
@@ -204,6 +247,15 @@ raw-rules endpoint for server-side consumers that want local evaluation.
 - **Public client keys.** They are identifiers, not credentials — they authorize
   nothing but reading one environment's resolved config, which is public to app users
   anyway. Rules and the admin surface stay behind real auth.
+- **Passkey lockout.** No password means no password reset: losing every registered
+  credential locks the operator out of their own config service, and the blast radius is
+  every project at once. Mitigated by making a second credential cheap and expected —
+  enrollment mints credentials rather than being a one-shot bootstrap — plus an
+  offline path that enrolls a fresh credential against the database directly, for the
+  case where nobody can authenticate to authorize one.
+- **The portal's domain is load-bearing.** Passkeys are bound to the relying-party id,
+  and resolved values are cached against the API's origin; changing either domain is a
+  migration, not a DNS edit (§4.6). Worth pinning both early.
 
 ## 8. Next step
 
