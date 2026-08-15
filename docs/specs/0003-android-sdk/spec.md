@@ -346,6 +346,17 @@ The spec 0002 §4.1 ownership boundary maps onto Kotlin as follows
     after `close()` returns**. Updates enqueued before the boundary may still
     drain to a live collector afterwards — that is delivery of accepted work,
     not a new callback.
+  - **The lifecycle observer is the one release with two speeds**, because
+    `Lifecycle.removeObserver` is a main-thread-only API and `close()` is not
+    a main-thread-only call. Split accordingly: **callbacks stop synchronously
+    and unconditionally** at `close()` — the observer is made inert in place,
+    so nothing the platform reports afterwards reaches the SDK — while the
+    **registration is removed before `close()` returns unless the main thread
+    is unavailable**, in which case the removal stays queued against an
+    already-inert observer and a `warn` says so. Waiting unboundedly would be
+    the literal reading of "resources released", and it is the wrong one: it
+    converts a stalled host main thread into a hung teardown, which is a worse
+    failure than a registration that outlives its client by a few frames.
   - **`Lever.shared` cannot be closed**: `close()` on the installed shared
     instance throws `IllegalStateException` naming the fix — the singleton is
     process-lived, and the API enforces it rather than asserting it. Explicit
