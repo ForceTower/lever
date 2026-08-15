@@ -64,7 +64,8 @@ Same reasoning as `lever-swift` (research 0002 §3.1): a dedicated repo with its
 own semver tags, consuming the monorepo's `packages/contract-fixtures` in CI via
 a pinned SHA. Distribution is **Maven Central** under the domain-verified
 `dev.forcetower` namespace — plain coordinates
-(`dev.forcetower:lever-android`), no consumer-side repository setup, which
+(`dev.forcetower.lever:lever-android`; a verified namespace covers its
+subgroups), no consumer-side repository setup, which
 JitPack and GitHub Packages both fail at for a public SDK. The name says
 *android*, not *kotlin*, because the library is Android-only (§3.2) and platform
 is what consumers search for.
