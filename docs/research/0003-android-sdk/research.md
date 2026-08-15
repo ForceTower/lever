@@ -52,7 +52,56 @@ Two inheritances, one audit debt:
   Before the plan's acceptance milestone is written, the same audit must happen:
   key inventory, where values cross module boundaries, whether the realtime
   listener is wired, min-SDK reality. The spec does not need it; the migration
-  milestone does.
+  milestone does. **Paid below (§2.1).**
+
+### 2.1 The flagship Android audit (plan 0003 M10)
+
+Audited 2026-08-14 against the flagship's Android app.
+
+**Foundational facts** (these gate plan 0003 M1 — they could have invalidated the
+SDK's shape, and did not):
+
+- **Platform floor: `minSdk 28`**, set once in the app's convention plugins for
+  every module. Comfortably above the SDK's `minSdk 26` (§3.2), so the library
+  is consumable as specified, and `java.time`/`java.nio.file` are available on
+  both sides.
+- **Process topology: one process.** No component in any manifest declares
+  `android:process`; the messaging service, the file provider, the widget
+  receiver, and the reminder receivers all run in the main process. The
+  `ProcessLifecycleOwner` foreground signal and the cache single-writer
+  assumption (spec 0003 §7, §11) hold without qualification, and the widget
+  reads flags in-process rather than as a second cache reader.
+
+**Migration facts** (they shape plan 0003 M11, not the SDK):
+
+- **The seam is one file.** `FeatureFlags` is a `@Singleton` holding
+  `FirebaseRemoteConfig.getInstance()` and publishing a
+  `StateFlow<FeatureGates>`; `FeatureGates` is an immutable data class with each
+  gate's default declared on its property. Nothing else in the app touches
+  Remote Config — the seam is exactly the shape research 0002 §2 found on iOS,
+  and it is where `Lever` slots in. Consumers (five view models and the
+  evaluation-reminder scheduler) collect `gates`, so the migration does not
+  reach them.
+- **Key inventory: ten parameters**, all flat, no `json`. Booleans defaulting
+  `false`: `enable_enrollment`, `enable_enrollment_certificate`,
+  `enable_academic_history`, `enable_paradoxo`, `enable_materials`,
+  `enable_library`, `enable_campus_event`, `enable_evaluation_reminders`.
+  Strings defaulting `""`: `document_captcha_site_key`,
+  `document_captcha_base_url`. Names are un-prefixed and shared with iOS, though
+  the two consoles are managed independently.
+- **Realtime is wired and load-bearing:** `addOnConfigUpdateListener` activates
+  and republishes on every update, which is the nudge path's job after the
+  migration.
+- **DEBUG behavior to preserve:** debug builds set
+  `minimumFetchIntervalInSeconds = 0` (spec 0003 §9's `minimumFetchInterval =
+  Duration.ZERO` recipe) and force every boolean gate `true` while passing the
+  two captcha strings through untouched. That override is app policy, not SDK
+  policy, and stays in the app's `readGates()`.
+- **Startup placement is already right:** `FeatureFlags.start()` is called from
+  `MelonApp.onCreate`, which is where `Lever.configure` goes (spec 0003 §5).
+
+Nothing here contradicts the plan's iOS-parity assumption, so plan 0003 M11
+stands as written.
 
 ## 3. The forks and how they were called
 
