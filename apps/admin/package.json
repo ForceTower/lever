@@ -9,8 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "deploy": "wrangler deploy",
-    "deploy:preview": "wrangler versions upload"
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.2.6",

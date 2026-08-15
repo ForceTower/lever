@@ -45,17 +45,21 @@ There is no deploy workflow in this repo: Cloudflare builds from the repository
 directly, which is also what gives preview builds per branch. Connect the repo in
 the Workers dashboard and set:
 
-| Setting                       | Value                                                             |
-| ----------------------------- | ----------------------------------------------------------------- |
-| Path                          | `/` — the workspace lockfile lives there                          |
-| Build command                 | `bun install --frozen-lockfile && bun run --cwd apps/admin build` |
-| Deploy command                | `bun run --cwd apps/admin deploy`                                 |
-| Non-production deploy command | `bun run --cwd apps/admin deploy:preview`                         |
-| `VITE_API_BASE_URL`           | build variable — the API's origin                                 |
-| `BUN_VERSION`                 | build variable — match `.mise.toml`                               |
+| Setting                       | Value                               |
+| ----------------------------- | ----------------------------------- |
+| Root directory                | `apps/admin`                        |
+| Build command                 | `bun install && bun run build`      |
+| Deploy command                | `npx wrangler deploy`               |
+| Non-production deploy command | `npx wrangler versions upload`      |
+| `VITE_API_BASE_URL`           | build variable — the API's origin   |
+| `BUN_VERSION`                 | build variable — match `.mise.toml` |
 
-`VITE_API_BASE_URL` has to be a **build** variable, not a Worker runtime one:
-there is no runtime here to read it.
+`bun install` from inside the app still resolves the workspace lockfile at the
+repo root, so the root directory can be the app itself. `VITE_API_BASE_URL` has
+to be a **build** variable, not a Worker runtime one: there is no runtime in an
+assets-only Worker to read it.
+
+From a shell instead: `bun run --cwd apps/admin deploy`.
 
 Point the API at the dashboard's origin afterwards — `LEVER_ADMIN_ORIGINS`,
 `LEVER_WEBAUTHN_RP_ID` and `LEVER_WEBAUTHN_ORIGINS` all describe _this_ app's
