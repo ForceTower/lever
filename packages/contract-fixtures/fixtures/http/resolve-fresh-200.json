@@ -78,13 +78,13 @@
         "context": {
           "platform": "ios",
           "appVersion": "5.2.0",
-          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "clientId": "6f9a1c2b-3d4e-4f5a-8b9c-0d1e2f3a4b5c",
           "attributes": {
             "locale": "pt-BR",
             "tier": "free trial"
           }
         },
-        "query": "platform=ios&appVersion=5.2.0&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c&attr.locale=pt-BR&attr.tier=free%20trial"
+        "query": "platform=ios&appVersion=5.2.0&clientId=6f9a1c2b-3d4e-4f5a-8b9c-0d1e2f3a4b5c&attr.locale=pt-BR&attr.tier=free%20trial"
       },
       "response": {
         "status": 200,

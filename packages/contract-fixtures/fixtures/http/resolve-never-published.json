@@ -13,10 +13,10 @@
         "context": {
           "platform": "ios",
           "appVersion": "1.0.0",
-          "clientId": "6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c",
+          "clientId": "6f9a1c2b-3d4e-4f5a-8b9c-0d1e2f3a4b5c",
           "attributes": {}
         },
-        "query": "platform=ios&appVersion=1.0.0&clientId=6f9a1c2b3d4e4f5a8b9c0d1e2f3a4b5c"
+        "query": "platform=ios&appVersion=1.0.0&clientId=6f9a1c2b-3d4e-4f5a-8b9c-0d1e2f3a4b5c"
       },
       "response": {
         "status": 200,

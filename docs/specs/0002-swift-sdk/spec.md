@@ -801,3 +801,58 @@ so the Kotlin and TypeScript SDKs inherit the same answers.
   `expect` carries `changed`, `error`, and `reads` (with an SDK-side type per
   read, which is how the mismatch tape says what it means). Responses are
   recorded, never hand-written.
+
+### 12.1 Settled by implementation review pass 1
+
+[Pass 1](./implementation_review_p1.md) found six defects in the Swift
+implementation. All six were real; the resolutions below are contract-level, so
+the Kotlin and TypeScript SDKs inherit them rather than rediscovering them.
+
+- **A nudge's activation policy is caller interest, not a token.** §5.3's
+  pending-nudge rule tracks the announced *version*, which decides whether a
+  follow-up request is needed. That is not enough: a nudge that lands while a
+  staging-only `fetch()` is in flight is answered by that request, the announced
+  version stops differing, and nothing activates — reads keep serving the old
+  snapshot with `autoActivateOnNudge` on. A nudge must **join** whatever
+  transport work answers it and apply its own policy when that work completes,
+  exactly as §5.1's "each caller independently applies its own policy" says.
+  Joining has to happen synchronously, at the moment the nudge is handled, or it
+  can slip past the very request it meant to join.
+- **The 1 MiB frame bound is accounted while parsing, not after.** A bound
+  checked on what is *left over* after consuming a chunk never sees a terminated
+  oversized line — that line is built, used, and discarded first. The parser
+  counts every byte of the current frame, across all field kinds, comments
+  included, and rejects **before** appending or decoding. The frame budget resets
+  when a blank line dispatches. Underneath it, transports must chunk on size as
+  well as on newlines: a peer that never sends a newline would otherwise grow an
+  unbounded buffer below the parser, where the frame bound cannot see it.
+- **Snapshot persistence carries a commit sequence.** §4.1 puts filesystem I/O
+  outside the state lock, which leaves two commits free to reach the disk in
+  either order — a thread preempted between committing version 2 and writing it
+  can land after a version 3 write, and the next launch restores version 2 over a
+  process serving version 3. Nothing detects that: it is an ordering bug, not a
+  data race. Every persisted snapshot is stamped with a sequence allocated under
+  the state lock, writes are serialized, and an out-of-order write is dropped.
+  A 304's freshness write is sequenced the same way.
+- **Singleton installation is reserved atomically.** Checking "not configured",
+  releasing the lock, building a client, and then installing it lets two callers
+  both pass the check and both build a live runtime. Installation moves
+  `empty → reserved → installed`, with client construction outside the lock
+  because it touches the filesystem and the host's log sink.
+- **Arithmetic on persisted time saturates.** Cached timestamps are Unix seconds
+  and must be non-negative; a structurally valid file carrying a negative one is
+  corrupt, because it would otherwise reach elapsed-time arithmetic and trap —
+  turning a corrupt cache into a crash, which §10.1 forbids. Elapsed-time and
+  deadline arithmetic saturate rather than overflow, and `minimumFetchInterval`
+  is clamped to 365 days with a `warn`, consistent with §3's repair-and-log
+  policy for every other out-of-range input.
+- **A persisted `clientId` must parse as a UUID — but a non-canonical spelling is
+  rewritten, not regenerated.** §7 defines the identity as a lowercase UUID, so
+  anything unparseable is corrupt and regenerates. An uppercase or mixed-case
+  UUID is the *same installation*, though, and regenerating it would reshuffle
+  the rollout bucketing key over a difference in spelling — worse, two SDKs
+  sharing a cache directory that each regenerated on the other's casing would
+  reshuffle it forever. It is canonicalized in place and kept.
+
+The §10.4 fixtures' `clientId` is a canonical lowercase UUID for the same reason:
+a tape must pin an identity an SDK could actually have produced.
