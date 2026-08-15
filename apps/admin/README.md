@@ -34,6 +34,41 @@ bun run --cwd apps/api admin:enroll <username> --name "Your Name"
 host. Nothing in the bundle is a secret: the session token lives in
 `localStorage` and is minted by the passkey ceremony.
 
+## Deploying
+
+`wrangler.jsonc` deploys `dist/` as an assets-only Worker — no server, and
+`not_found_handling` hands every router-owned path back `index.html`.
+`VITE_API_BASE_URL` is read at **build** time and compiled into the bundle, so a
+deployment is pinned to one API origin.
+
+There is no deploy workflow in this repo: Cloudflare builds from the repository
+directly, which is also what gives preview builds per branch. Connect the repo in
+the Workers dashboard and set:
+
+| Setting                       | Value                                                             |
+| ----------------------------- | ----------------------------------------------------------------- |
+| Path                          | `/` — the workspace lockfile lives there                          |
+| Build command                 | `bun install --frozen-lockfile && bun run --cwd apps/admin build` |
+| Deploy command                | `bun run --cwd apps/admin deploy`                                 |
+| Non-production deploy command | `bun run --cwd apps/admin deploy:preview`                         |
+| `VITE_API_BASE_URL`           | build variable — the API's origin                                 |
+| `BUN_VERSION`                 | build variable — match `.mise.toml`                               |
+
+`VITE_API_BASE_URL` has to be a **build** variable, not a Worker runtime one:
+there is no runtime here to read it.
+
+Point the API at the dashboard's origin afterwards — `LEVER_ADMIN_ORIGINS`,
+`LEVER_WEBAUTHN_RP_ID` and `LEVER_WEBAUTHN_ORIGINS` all describe _this_ app's
+domain, not the API's. The RP id is what a passkey is bound to: changing it
+invalidates every enrolled credential.
+
+**Preview builds cannot sign in.** A preview gets a fresh hostname per
+deployment, and both gates in front of the admin surface are exact-origin by
+design: WebAuthn refuses an assertion from an origin outside the RP id, and
+`LEVER_ADMIN_ORIGINS` is an allowlist that rejects `*`. Previews are for reading
+the UI; a preview that needs a session wants its own API with its own origins
+listed, not a wildcard on the real one.
+
 ## Shape
 
 ```

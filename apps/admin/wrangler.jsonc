@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lever",
+  "compatibility_date": "2026-08-15",
+  // An assets-only Worker: there is no server here, just the built SPA. Nothing
+  // about the API belongs in this config — its origin is compiled into the
+  // bundle at build time from VITE_API_BASE_URL.
+  "assets": {
+    "directory": "./dist",
+    // Every route below / belongs to the router in the browser, so an unmatched
+    // path serves index.html instead of a 404.
+    "not_found_handling": "single-page-application",
+  },
+}
