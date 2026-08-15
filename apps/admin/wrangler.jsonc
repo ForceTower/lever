@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "lever",
+  "name": "lever-admin",
   "compatibility_date": "2026-08-15",
   // An assets-only Worker: there is no server here, just the built SPA. Nothing
   // about the API belongs in this config — its origin is compiled into the
