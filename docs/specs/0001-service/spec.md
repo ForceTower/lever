@@ -816,6 +816,7 @@ Standard shapes, all zod-validated, all returning the §5 conventions, all behin
 
 | Route | Methods | Permission |
 | --- | --- | --- |
+| `/overview` | `GET` — every project with its environments, each carrying latest version, dirty flag and draft counts | read |
 | `/projects` | `GET` list, `POST` create | read / write |
 | `/projects/:projectId` | `GET`, `PATCH` (name), `DELETE` | read / write / **admin** |
 | `/projects/:projectId/environments` | `GET`, `POST` (key; client key generated server-side) | read / write |
@@ -847,6 +848,12 @@ Successful `DELETE`s answer `200` with `data: null` rather than `204`. A bare 20
 no body, and the §5.1 envelope is the whole point of having one dialect — a client
 that unwraps every response should not need a special case for the one verb that
 returns nothing.
+
+`/overview` is a read-only convenience over the two list routes above it, and exists
+because the dashboard cannot render its first screen without it: the project list and
+the environment switcher both name the live version and the unpublished-draft state of
+every environment, which would otherwise be one request per environment before
+anything paints. It composes existing service reads and adds no write path.
 
 Conditional values are written as a whole ordered list rather than item-by-item:
 ordering is first-match-wins semantics (§4), so partial reorders are a footgun the API

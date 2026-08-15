@@ -5,6 +5,7 @@ import { initLogger } from "./logger";
 import { createAdminAuthService, type AdminAuthService } from "./service/admin-auth";
 import { createConditionsService, type ConditionsService } from "./service/admin/conditions";
 import { createEnvironmentsService, type EnvironmentsService } from "./service/admin/environments";
+import { createOverviewService, type OverviewService } from "./service/admin/overview";
 import { createParametersService, type ParametersService } from "./service/admin/parameters";
 import { createProjectsService, type ProjectsService } from "./service/admin/projects";
 import { createPublishService, type PublishService } from "./service/publish";
@@ -100,6 +101,7 @@ export interface Env {
   services: {
     projects: ProjectsService;
     environments: EnvironmentsService;
+    overview: OverviewService;
     conditions: ConditionsService;
     parameters: ParametersService;
     publish: PublishService;
@@ -144,6 +146,7 @@ export function buildEnv(
     services: {
       projects: createProjectsService(repos, resolveCache),
       environments: createEnvironmentsService(repos, resolveCache),
+      overview: createOverviewService(repos),
       conditions: createConditionsService(repos),
       parameters: createParametersService(db, repos),
       publish: createPublishService(db, repos, resolveCache),

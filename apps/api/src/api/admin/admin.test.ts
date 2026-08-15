@@ -210,6 +210,43 @@ describe("environments", () => {
   });
 });
 
+describe("overview", () => {
+  test("nests environments under their project with version and dirty state", async () => {
+    const { request } = createTestApp();
+    const project = await createProject(request);
+    const environment = await createEnvironment(request, project.id);
+    await createCondition(request, environment.id);
+    await createParameter(request, environment.id);
+
+    const [entry] = await dataOf(await request("/v1/admin/overview"));
+    expect(entry.key).toBe("acme");
+    expect(entry.environments).toHaveLength(1);
+    expect(entry.environments[0]).toMatchObject({
+      key: "prod",
+      clientKey: environment.clientKey,
+      latestVersion: 0,
+      draftDirty: true,
+      parameterCount: 1,
+      conditionCount: 1,
+    });
+
+    await request(`/v1/admin/environments/${environment.id}/publish`, post({}));
+    const [published] = await dataOf(await request("/v1/admin/overview"));
+    expect(published.environments[0]).toMatchObject({ latestVersion: 1, draftDirty: false });
+  });
+
+  test("an empty deployment answers with an empty list", async () => {
+    const { request } = createTestApp();
+    expect(await dataOf(await request("/v1/admin/overview"))).toEqual([]);
+  });
+
+  test("needs config:read", async () => {
+    const { request, signIn } = createTestApp();
+    const token = await signIn({ permissions: ["accounts:manage"] });
+    expect((await request("/v1/admin/overview", { token })).status).toBe(403);
+  });
+});
+
 describe("conditions", () => {
   test("create, list, update", async () => {
     const { request } = createTestApp();
