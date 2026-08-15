@@ -45,19 +45,20 @@ There is no deploy workflow in this repo: Cloudflare builds from the repository
 directly, which is also what gives preview builds per branch. Connect the repo in
 the Workers dashboard and set:
 
-| Setting                       | Value                               |
-| ----------------------------- | ----------------------------------- |
-| Root directory                | `apps/admin`                        |
-| Build command                 | `bun install && bun run build`      |
-| Deploy command                | `npx wrangler deploy`               |
-| Non-production deploy command | `npx wrangler versions upload`      |
-| `VITE_API_BASE_URL`           | build variable — the API's origin   |
-| `BUN_VERSION`                 | build variable — match `.mise.toml` |
+| Setting         | Value                                                             |
+| --------------- | ----------------------------------------------------------------- |
+| Root directory  | `/`                                                               |
+| Build command   | `bun install && bun run --filter @lever/admin build`              |
+| Deploy command  | `npx wrangler deploy --config apps/admin/wrangler.jsonc`          |
+| Version command | `npx wrangler versions upload --config apps/admin/wrangler.jsonc` |
+| Variable        | `VITE_API_BASE_URL` — the API's origin                            |
 
-`bun install` from inside the app still resolves the workspace lockfile at the
-repo root, so the root directory can be the app itself. `VITE_API_BASE_URL` has
-to be a **build** variable, not a Worker runtime one: there is no runtime in an
-assets-only Worker to read it.
+The root directory is the workspace root, so the lockfile and every workspace
+resolve; `--config` then points wrangler at this app, and the paths inside
+`wrangler.jsonc` (`./dist`) resolve relative to that file, not to the cwd.
+
+`VITE_API_BASE_URL` is a **build** variable, not a Worker runtime one: there is
+no runtime in an assets-only Worker to read it.
 
 From a shell instead: `bun run --cwd apps/admin deploy`.
 
