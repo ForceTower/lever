@@ -6,10 +6,10 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "oxlint --type-aware && oxfmt --check . && tsc --noEmit",
-    "fix": "oxlint --type-aware --fix && oxfmt .",
+    "check": "bun run lint && oxfmt --check . && tsc --noEmit && tsc --noEmit -p apps/admin",
+    "fix": "oxlint --type-aware --fix apps/api packages && oxlint --fix apps/admin && oxfmt .",
     "fmt": "oxfmt .",
-    "lint": "oxlint --type-aware",
+    "lint": "oxlint --type-aware apps/api packages && oxlint apps/admin",
     "test": "bun test",
     "fixtures:update": "LEVER_UPDATE_FIXTURES=1 bun test apps/api/src/api/http-fixtures.test.ts"
   },

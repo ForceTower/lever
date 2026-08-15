@@ -12,5 +12,7 @@
     "noEmit": true,
     "types": ["bun"]
   },
-  "exclude": ["node_modules"]
+  // The dashboard is a browser project: JSX, DOM libs, no bun globals. It is
+  // checked by its own tsconfig, which `bun run check` runs alongside this one.
+  "exclude": ["node_modules", "apps/admin"]
 }

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": [],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  // The root config excludes this app so its own `tsc --noEmit` skips the JSX;
+  // that exclusion is inherited, so it has to be cleared here.
+  "exclude": ["node_modules"],
+  "include": ["src", "vite.config.ts"]
+}

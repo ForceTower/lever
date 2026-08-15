@@ -1,0 +1,169 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+/* The custom variants (data-checked, data-open, …) the shadcn components use;
+   without it a Switch renders its thumb over a track with no fill. */
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* Dark mode keys off the `.dark` class next-themes toggles on <html>. */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * shadcn tokens, carrying the design's palette (zinc surfaces, blue primary).
+ * The three diff tones below them are Lever's own vocabulary and appear
+ * everywhere the draft/published split does: `warn` is "edited but not live",
+ * `add` and `del` are the publish diff's added and removed.
+ */
+:root {
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
+  --popover-foreground: #09090b;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #b91c1c;
+  --destructive-foreground: #ffffff;
+  --border: #e4e4e7;
+  --input: #d4d4d8;
+  --ring: #93c5fd;
+  --radius: 0.625rem;
+
+  --warn: #a16207;
+  --warn-bg: #fefce8;
+  --warn-border: #fde68a;
+  --add: #15803d;
+  --add-bg: #f0fdf4;
+  --add-border: #bbf7d0;
+  --del: #b91c1c;
+  --del-bg: #fef2f2;
+  --del-border: #fecaca;
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #101013;
+  --card-foreground: #fafafa;
+  --popover: #101013;
+  --popover-foreground: #fafafa;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #18181b;
+  --secondary-foreground: #fafafa;
+  --muted: #18181b;
+  --muted-foreground: #a1a1aa;
+  --accent: #18181b;
+  --accent-foreground: #fafafa;
+  --destructive: #f87171;
+  --destructive-foreground: #09090b;
+  --border: #27272a;
+  --input: #3f3f46;
+  --ring: #1d4ed8;
+
+  --warn: #fbbf24;
+  --warn-bg: #1f1a06;
+  --warn-border: #57430c;
+  --add: #4ade80;
+  --add-bg: #0a1a10;
+  --add-border: #166534;
+  --del: #f87171;
+  --del-bg: #1c0d0d;
+  --del-border: #7f1d1d;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn-border: var(--warn-border);
+  --color-add: var(--add);
+  --color-add-bg: var(--add-bg);
+  --color-add-border: var(--add-border);
+  --color-del: var(--del);
+  --color-del-bg: var(--del-bg);
+  --color-del-border: var(--del-border);
+
+  /*
+   * The shadcn components reach for rounded-xl/2xl/4xl; the design's controls
+   * are rounded rectangles, not pills, so the scale is pinned to the two radii
+   * it actually uses — 8px for controls, 10px for surfaces.
+   */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) - 2px);
+  --radius-2xl: var(--radius);
+  --radius-4xl: calc(var(--radius) - 2px);
+
+  --font-sans: "Outfit Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 6px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+    background-clip: padding-box;
+  }
+}
+
+@keyframes leverIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer utilities {
+  .animate-lever-in {
+    animation: leverIn 0.2s ease both;
+  }
+}

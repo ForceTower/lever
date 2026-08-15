@@ -9,7 +9,7 @@ Swift, TypeScript) stay thin: fetch-and-activate, disk cache, code defaults as t
 and a server-sent-events nudge for instant rollout.
 
 **Status:** the backend service (resolve, stream, admin API, passkey admin auth,
-publish/rollback) is implemented; the dashboard and SDKs are next. The founding scope and every "why" live in
+publish/rollback) and the dashboard are implemented; the SDKs are next. The founding scope and every "why" live in
 [docs/research/0001-product-scope/research.md](docs/research/0001-product-scope/research.md);
 the service design in [docs/specs/0001-service/spec.md](docs/specs/0001-service/spec.md).
 
@@ -33,6 +33,15 @@ LEVER_JWT_SECRET="$(head -c 32 /dev/urandom | base64)" \
 
 The server migrates its SQLite schema automatically at boot and listens on `:3000`.
 `GET /healthz` answers when it is up.
+
+The dashboard is a separate static app; point it at that API and run it:
+
+```sh
+cp apps/admin/.env.example apps/admin/.env
+bun run --cwd apps/admin dev   # http://localhost:5173
+```
+
+See [apps/admin/README.md](apps/admin/README.md) for its build and deployment.
 
 Every JSON response — resolve and admin alike — is one envelope:
 

@@ -7,6 +7,9 @@
   "plugins": ["typescript", "import"],
   "rules": {
     "typescript/no-explicit-any": "error",
-    "typescript/consistent-return": "off"
+    "typescript/consistent-return": "off",
+    // The dashboard's entry pulls its stylesheet in for its side effect; that
+    // is what a bundled CSS import is.
+    "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }]
   }
 }

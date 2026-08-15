@@ -49,9 +49,23 @@ deliberate act that starts with updating the research doc, not the code.
 - `mise` for tool version management, `bun` for packages and scripts (never `npm`,
   `yarn`, or `pnpm`; `bunx` in place of `npx`), `oxlint` for linting and `oxfmt` for
   formatting (never `prettier` or `eslint`).
-- Workspace scripts (`bun run check` / `fix` / `fmt` / `lint`) get wired with the
-  first code; keep this section updated as they land.
+- Workspace scripts: `bun run check` (lint + format check + both tsconfigs), `fix`,
+  `fmt`, `lint`. `apps/admin` is typechecked by its own tsconfig (JSX, DOM libs) and
+  linted **without** `--type-aware`: oxlint's type pass does not resolve the `@/`
+  alias, so aliased types would degrade to `any` and the rules would misfire.
 - Run the fixer frequently and after finishing a task; do not hand-fix formatting.
+
+## Dashboard (`apps/admin`)
+
+- Vite + React + TanStack Router/Query + Tailwind v4 + shadcn, deployed separately
+  from the API (spec 0001 §9.4) — it may depend on the HTTP contract, never on
+  `apps/api` source.
+- UI comes from shadcn: `bunx shadcn@latest add <component>` writes into
+  `src/components/ui`. Extend a generated component's `cva` variants when a new tone
+  is needed; do not hand-roll a parallel component. `src/styles/index.css` owns the
+  theme, including the `warn` / `add` / `del` diff tones.
+- Draft-vs-published state is read from the server's publish diff
+  (`GET /environments/:id/diff`), never recomputed client-side.
 
 ## TypeScript conventions
 
