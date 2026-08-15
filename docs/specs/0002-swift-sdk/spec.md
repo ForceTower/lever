@@ -751,3 +751,53 @@ them through its transport double — same tapes, three languages
   research 0002 §5, after the flagship migration proves the base API.
 - **Background refresh** (`BGAppRefreshTask`) if launch-time staleness ever
   matters in practice; deliberately absent from v1.
+
+## 12. Implementation notes
+
+Decisions this spec did not pin, settled while building M1–M10 and recorded here
+so the Kotlin and TypeScript SDKs inherit the same answers.
+
+- **`json` models must be `nonisolated` under `MainActor` default isolation.**
+  A target compiled with `-default-isolation MainActor` gets a main-actor-isolated
+  synthesized `Decodable` conformance, which cannot satisfy
+  `LeverKey(json:default:)`'s `Decodable & Sendable` requirement. Decoding runs
+  off the main actor, so `nonisolated struct` is the honest annotation rather
+  than a workaround. It is in the README beside §2.2's "prefer value types"
+  guidance, and both consumer fixtures compile it. This is the one piece of
+  friction the isolation spike found; it needs no API change.
+- **The initial lifecycle phase is the init fetch.** §5.1 ("on `init`, run the
+  automatic fetch path") and §5.2 ("foreground: run the automatic fetch path")
+  read as two triggers, and implementing them as two made a failing first launch
+  issue two requests — they coalesce only when concurrent. Since the notification
+  source reports its current phase at subscription (§5.2), the first phase event
+  *is* the init trigger, for a client born backgrounded as much as foregrounded.
+  One trigger, one request.
+- **A stream round that received a frame still backs off before reconnecting.**
+  §6.2 says a successful open that receives a frame resets `n`; read literally
+  as "reconnect immediately", a server that closes right after the connect frame
+  becomes a reconnect hot loop. Receiving a frame resets the counter, and the
+  reconnect still takes its `random(0, 2⁰)` delay.
+- **The identity file is published with `link`, not `O_CREAT | O_EXCL`.** An
+  exclusive create publishes the name before the bytes, so a racing process can
+  read an empty file, judge it corrupt, and overwrite the winner's `clientId`
+  with its own — the exact split identity §7's exclusive create exists to
+  prevent. Writing a temp file and hard-linking it into place makes "the file
+  exists" mean "the file is complete", which is what the loser's re-read depends
+  on.
+- **The resolve query string is byte-defined.** §6.1 names the query items but
+  not their order or encoding, and the contract fixtures compare request bytes.
+  The rule, pinned on both sides in `packages/contract-fixtures/README.md`:
+  reserved names first in the fixed order `platform`, `appVersion`, `clientId`,
+  then `attr.*` sorted by name in ascending UTF-8 byte order; every value
+  percent-encoded over UTF-8 against the RFC 3986 unreserved set
+  (`A-Za-z0-9-._~`), so a space is `%20` and never `+`. The same byte ordering
+  is what §3's deterministic twenty-attribute selection sorts by.
+- **The §10.4 fixture format grew what generation required.** Each case carries a
+  `setup` (conditions, parameters, whether to publish) so the service's
+  integration tests can build the environment and record the real response; a
+  step may carry `before: "rotate-key" | "publish"` to move the server between
+  requests; `ifNoneMatch` is `{ "fromStep": n }` rather than a literal, so a
+  regenerated ETag cannot desync from the validator that references it; and
+  `expect` carries `changed`, `error`, and `reads` (with an SDK-side type per
+  read, which is how the mismatch tape says what it means). Responses are
+  recorded, never hand-written.

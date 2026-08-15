@@ -1,6 +1,6 @@
 # Plan 0002 — implementing the Swift SDK
 
-- **Status:** not started
+- **Status:** M1–M10 landed; M11 (the flagship migration) is the remaining acceptance
 - **Spec:** [0002 — the Swift SDK](./spec.md)
 - **Shape:** eleven milestones across two repos — `lever-swift` (M1–M8, M10) and
   this monorepo (M9), with the flagship migration (M11) as acceptance. Each
